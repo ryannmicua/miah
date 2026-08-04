@@ -39,6 +39,9 @@ The approved vision defines Miah as a resumable plan supervisor that coordinates
 
 - Only the operator approves moving to the next phase. Rewrite this file only when a phase's exit condition is met.
 - The operator is the sole authority on scope and vision. Never invent requirements or expand scope without asking.
+- `VISION.md` is the canonical product definition; `STRATEGY.md` is derived from it and must not conflict with it, introduce new scope, or restate product behavior. If they conflict, `VISION.md` governs — surface the drift to the operator; never silently edit either document to resolve it.
+- After either `VISION.md` or `STRATEGY.md` changes, run the `vision-strategy-align` skill and report the verdict before continuing with planning or implementation work.
+- When running `ce-strategy` in this repo, answer its interview from `VISION.md`'s content — do not improvise new product answers — and run `vision-strategy-align` on the result.
 - Use `tmp/` for throwaway scratch; never commit anything in it (it is git-ignored).
 - Save durable artifacts in the repository root or in `docs/`.
 - When in doubt about what the operator wants, ask — one question at a time.
