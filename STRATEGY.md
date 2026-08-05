@@ -1,6 +1,6 @@
 ---
 name: Miah
-last_updated: 2026-08-03
+last_updated: 2026-08-05
 ---
 
 # Miah Strategy
@@ -13,7 +13,9 @@ Operators directing multiple specialist agents cannot keep up with the supervisi
 
 ## Our approach
 
-Miah wins by narrowly supervising one immutable approved plan through role-separated agents, durable evidence, and explicit authority gates, rather than becoming another implementation agent or general-purpose orchestrator.
+Miah wins by maximizing trustworthy execution within an operator-defined effort ceiling. It narrowly supervises one immutable approved-plan snapshot through role-separated agents, durable evidence, and explicit authority gates rather than becoming another implementation agent or general-purpose orchestrator.
+
+Specialist-agent claims are evidence inputs, not facts. Trust rests on independent testing or review and directly verifiable artifacts preserved in the run record, not on an agent's assertion alone.
 
 ## Who it's for
 
@@ -22,9 +24,9 @@ Miah wins by narrowly supervising one immutable approved plan through role-separ
 ## Key metrics
 
 - **First-pass approval rate** - The share of completed runs the operator accepts without sending the whole plan back for rework; measured from final approval decisions in the run journal.
-- **Operator touch time** - The operator's active supervision time per approved run; measured from approval and escalation interactions.
+- **Operator effort compliance** - The share of runs completed without exceeding the operator-defined effort ceiling; measured from approval and escalation interactions together with the run's configured limits.
 - **Plan drift rate** - The share of implementation units that attempt or exhibit unauthorized changes to scope, requirements, or acceptance criteria; measured from escalations and review findings in the run journal.
-- **Proof completeness rate** - The share of completion claims backed by the required implementation records, independent test results, and review findings; measured from run evidence.
+- **Corroborated proof rate** - The share of consequential completion claims backed by independent test or review results, or directly verifiable artifacts, rather than an agent's recorded assertion alone; measured from run evidence.
 
 ## Tracks
 
@@ -32,7 +34,7 @@ Miah wins by narrowly supervising one immutable approved plan through role-separ
 
 Turn an approved plan into bounded work while preventing drift from its scope, requirements, and acceptance criteria.
 
-_Why it serves the approach:_ It makes the immutable approved plan the controlling authority for execution.
+_Why it serves the approach:_ It makes the immutable approved-plan snapshot the controlling authority for execution.
 
 ### Durable execution and recovery
 
@@ -42,15 +44,15 @@ _Why it serves the approach:_ It makes supervised work resumable and prevents pr
 
 ### Independent assurance
 
-Keep building, testing, and review responsibilities separate so acceptance rests on credible proof.
+Keep building, testing, and review responsibilities separate, and treat every specialist-agent claim as untrusted until corroborated or directly verified.
 
-_Why it serves the approach:_ It prevents implementation claims from being treated as sufficient evidence of correctness.
+_Why it serves the approach:_ It prevents role assignment, journal presence, or implementation claims from being mistaken for proof of correctness.
 
 ### Operator control and visibility
 
-Make status, escalations, resource use, and approval decisions clear without requiring constant supervision.
+Make status, escalations, resource use, and approval decisions clear while keeping operator involvement within defined limits.
 
-_Why it serves the approach:_ It reduces the operator's workload while preserving their authority over consequential decisions.
+_Why it serves the approach:_ It preserves operator authority without allowing stronger assurance to create unbounded supervision work.
 
 ## Not working on
 
