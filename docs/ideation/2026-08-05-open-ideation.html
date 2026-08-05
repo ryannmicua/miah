@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Miah — open discovery</title>
+<style>
+  :root {
+    --bg: #faf9f7;
+    --surface: #ffffff;
+    --ink: #232933;
+    --muted: #5c6573;
+    --line: #e4e1da;
+    --accent: #2f6f4f;
+    --accent-text: #215a3d;
+    --accent-soft: #e7f0ea;
+    --warn: #8a5a08;
+    --warn-text: #6f4a08;
+    --warn-soft: #faf0dc;
+    --info-text: #35506b;
+    --info-soft: #e9f0f6;
+    --chip: #eceae4;
+    --chip-text: #454c58;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #171a21;
+      --surface: #1e232d;
+      --ink: #e5e9f0;
+      --muted: #9aa4b3;
+      --line: #333b4a;
+      --accent: #6fae8d;
+      --accent-text: #8fceac;
+      --accent-soft: #1e3529;
+      --warn: #d9a33a;
+      --warn-text: #ecc06a;
+      --warn-soft: #372c15;
+      --info-text: #9ec3e6;
+      --info-soft: #1d2a38;
+      --chip: #2a303c;
+      --chip-text: #c3cbd8;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 28px 64px;
+  }
+  header { margin-bottom: 8px; }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent-text);
+    font-weight: 600;
+    margin: 0 0 6px;
+  }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; font-weight: 700; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 20px;
+  }
+  .chip {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: var(--chip);
+    color: var(--chip-text);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .chip.accent { background: var(--accent-soft); color: var(--accent-text); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 28px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 16px;
+  }
+  .stat b { display: block; font-size: 20px; line-height: 1.1; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  section { margin-top: 36px; }
+  h2 {
+    font-size: 20px;
+    margin: 0 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 16.5px; margin: 22px 0 8px; }
+  p { max-width: 72ch; }
+  a { color: var(--accent-text); }
+  .jump {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 18px;
+    margin: 0 0 20px;
+    font-size: 13.5px;
+  }
+  .jump ul { margin: 8px 0 0; padding-left: 20px; }
+  article {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px 22px;
+    margin: 0 0 20px;
+  }
+  article h3 { margin: 0 0 4px; }
+  .rank {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent-text);
+    letter-spacing: .06em;
+  }
+  .card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 10px;
+  }
+  dl { margin: 12px 0 0; }
+  dl div { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+  dt {
+    flex: 0 0 92px;
+    font-weight: 700;
+    font-size: 12.5px;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  dd { margin: 0; }
+  figure { margin: 14px 0 4px; }
+  figure svg { width: 100%; height: auto; }
+  figcaption {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin-top: 6px;
+    max-width: 72ch;
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--chip); font-weight: 700; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+    font-size: .92em;
+    background: var(--chip);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .callout {
+    background: var(--info-soft);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    margin: 16px 0;
+    max-width: 78ch;
+  }
+  .callout b { color: var(--info-text); }
+  footer.composition-signal {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <p class="eyebrow">Ideation · Discovery document</p>
+  <h1>Miah — open improvement ideation</h1>
+  <div class="meta">
+    <span class="chip">date · 2026-08-05</span>
+    <span class="chip">topic · open-ideation</span>
+    <span class="chip accent">mode · repo-grounded</span>
+    <span class="chip">focus · none (surprise-me)</span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat"><b>48</b><span>raw ideas across 6 frames</span></div>
+  <div class="stat"><b>30</b><span>candidates after dedupe + synthesis</span></div>
+  <div class="stat"><b>7</b><span>survivors, ranked below</span></div>
+  <div class="stat"><b>2</b><span>refuted by basis verification</span></div>
+</div>
+
+<section id="grounding-context">
+  <h2>Grounding Context</h2>
+  <h3>Codebase context</h3>
+  <p>Miah is in <strong>Phase 2 (Planning)</strong> — no code yet, eleven docs-only commits, working tree clean. <strong>VISION.md</strong> defines the product: a <em>resumable plan supervisor</em> that coordinates specialist agents to execute <em>one immutable approved plan</em>, with independent testing, review, durable evidence, bounded autonomy, and operator approval gates. <strong>STRATEGY.md</strong> frames winning as "maximizing trustworthy execution within an operator-defined effort ceiling," across four tracks — plan-faithful orchestration, durable execution/recovery, independent assurance, operator control/visibility — measured by first-pass approval rate, operator effort compliance, plan drift rate, and corroborated proof rate. It is explicitly <em>not</em> an implementation agent or a general orchestrator.</p>
+  <p><code>docs/planning-brief.md</code> frames eight open design decisions (D1–D8, dependency-ordered) for <code>ce-brainstorm</code> → <code>ce-plan</code>. The <code>docs/research/</code> files are decision-free grounding: a substrate (Paseo) capability inventory, a field SOTA digest, ecosystem conventions, and a marker-staged prior-art digest held out of brainstorming.</p>
+  <p><strong>Pain points / gaps:</strong> D1 is the keystone — Miah must outlive any agent session yet harnesses are session-bound. D2: tester/reviewer independence is a <em>context-isolation</em> property, not a role label, and the substrate doesn't enforce it. D4 ("hardest to retrofit"): write-ahead journal, idempotency, leases, resume-with-reconcile, crash-tested recovery all open. D7: threshold numbers are deferred, though research shows they're a runtime budget-predicate mechanism, not config values. Stale README, a session-history probe bug, empty <code>docs/findings/</code>, no <code>testing-runbook.md</code>, and a Paseo CLI contract needing re-verification.</p>
+  <p><strong>Leverage points:</strong> D1+D2 shape everything downstream. The D5 evidence contract (deterministic &gt; calibrated LLM-judge &gt; human grader triage) is the highest-leverage reliability mechanism, measured directly by the corroborated-proof-rate metric. The operator's own authored orchestration preferences (role→model map, cross-family audit, worktree isolation) are a ready-made D2/D8 candidate.</p>
+  <h3>Past learnings</h3>
+  <p>None — no <code>docs/solutions/</code> store exists, which is expected for a planning-phase repo. The research docs above are the de facto knowledge base; the learning store should be seeded at Phase 3.</p>
+  <h3>External context (web research)</h3>
+  <p>Supervisor/orchestrator-worker is the 2026 default (~70% of production deployments); the orchestrator plans and delegates but never executes, workers are context-isolated. The dominant failure mode of static plans is <em>stale plan, no replanning</em> — Miah's immutability is a deliberate inversion of that trend and must answer it. Durable execution is solved infrastructure: Temporal (event-sourced workflows, replay-based crash recovery, zero-compute waits, continue-as-new), LangGraph checkpointing, Cloudflare durable gates, DBOS. HITL gates are a formal pattern — propose → review → cryptographically-locked payload → execute → outcome-log; approval fatigue is real (~93% rubber-stamp), so exception-only, risk-scored review is the scale answer; approval is not execution. Evidence has formal theory ("Auditable Agents": action recoverability, lifecycle coverage, policy checkability, responsibility attribution, evidence integrity); audit trail ≠ observability. Bounded autonomy ships as deny-first stacks and graduated, evidence-gated dials. No one sells "approved immutable plan + durable evidence + bounded autonomy" as a packaged unit; EU AI Act Articles 12/14 enforcement began Aug 2026, making audit trails procurement table-stakes. Aider's rule: reversible = autonomous, irreversible = gated.</p>
+</section>
+
+<section id="topic-axes">
+  <h2>Topic Axes</h2>
+  <p>Decomposition skipped — surprise-me mode.</p>
+</section>
+
+<section id="ranked-ideas">
+  <h2>Ranked Ideas</h2>
+  <div class="jump">
+    <strong>Jump to:</strong>
+    <ul>
+      <li><a href="#i1">1. The durable-run spine</a></li>
+      <li><a href="#i2">2. The evidence spine</a></li>
+      <li><a href="#i3">3. The operator-time stack</a></li>
+      <li><a href="#i4">4. The operator-owned amendment path</a></li>
+      <li><a href="#i5">5. Mechanical independence</a></li>
+      <li><a href="#i6">6. Run cards</a></li>
+      <li><a href="#i7">7. Mechanical staging</a></li>
+    </ul>
+  </div>
+
+  <article id="i1">
+    <div class="rank">1 · TOP PICK</div>
+    <h3>The durable-run spine — D1 + D4 resolved together</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 85%</span>
+      <span class="chip">Complexity High</span>
+    </div>
+    <p>Miah's supervisor becomes a <strong>stateless interpreter</strong> of two durable artifacts — the immutable plan snapshot and the append-only journal. Any host (CLI, cron, Paseo agent, tomorrow's shell) can acquire the single-writer lease and drive the run; "resume" is just running the function again, so session-boundness evaporates. The run is a directory of <strong>unit-scoped mini-runs</strong>: each unit owns its sub-journal, lease, budget, and partial-state termination, with continue-as-new closing long histories. Recovery is <strong>reconcile-then-continue</strong> — verify every dispatched unit reached a terminal state before proceeding — under a standing invariant: delete everything but the journal, rebuild state from it alone, resume identically. A <code>miah drill</code> command deliberately kills the supervisor mid-run and emits the reconcile report, making crash-testing a unit-test ritual instead of a project milestone.</p>
+    <figure>
+      <svg viewBox="0 0 760 250" role="img" aria-label="Durable-run spine flow diagram">
+        <rect x="30" y="40" width="150" height="54" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="105" y="70" text-anchor="middle" font-size="13" fill="#215a3d" font-weight="600">Plan snapshot</text>
+        <rect x="30" y="120" width="150" height="54" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="105" y="148" text-anchor="middle" font-size="13" fill="#215a3d" font-weight="600">Journal</text>
+        <rect x="250" y="70" width="230" height="60" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="365" y="95" text-anchor="middle" font-size="13" fill="#232933" font-weight="600">Stateless interpreter</text>
+        <text x="365" y="113" text-anchor="middle" font-size="10" fill="#5c6573">any host · single-writer lease</text>
+        <rect x="540" y="70" width="190" height="60" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="635" y="95" text-anchor="middle" font-size="13" fill="#232933" font-weight="600">Reconcile → continue</text>
+        <text x="635" y="113" text-anchor="middle" font-size="10" fill="#5c6573">terminal-state check</text>
+        <rect x="540" y="170" width="190" height="50" rx="8" fill="#eaf0f6" stroke="#35506b"/>
+        <text x="635" y="192" text-anchor="middle" font-size="12.5" fill="#35506b" font-weight="600">Unit-scoped mini-runs</text>
+        <text x="635" y="207" text-anchor="middle" font-size="10" fill="#5c6573">sub-journals · continue-as-new</text>
+        <path d="M180 60 L244 82" stroke="#5c6573" stroke-width="1.5" fill="none"/>
+        <path d="M180 147 L244 118" stroke="#5c6573" stroke-width="1.5" fill="none"/>
+        <path d="M480 100 L532 100" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+        <path d="M635 130 L635 162" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+        <path d="M540 195 L180 195" stroke="#5c6573" stroke-width="1.5" fill="none"/>
+        <path d="M180 195 L180 182" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a1)"/>
+        <text x="300" y="187" text-anchor="middle" font-size="10" fill="#5c6573">outcomes append</text>
+        <defs>
+          <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Illustrative flow: the durable artifacts (snapshot + journal) feed a stateless interpreter any host can run; recovery is reconcile-then-continue over unit-scoped mini-runs, and every outcome appends back to the journal.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> planning-brief D1 ("Where does the durable supervisor loop actually live?"); agent-orchestration-research §1.5 ("The thing that needs to survive a crash is not the code, it is the record of what the code has already done"; single-writer lease; write-ahead journal) and §2.9 ("the resume path is exactly where bugs live"); VISION ("Every run is locked to an immutable snapshot"; "A crash or interrupted session does not lose completed work"). <strong>external:</strong> Temporal event-sourced workflows, LangGraph checkpointing. Four of six frames landed on this shape independently — the strongest convergence in the run.</dd></div>
+      <div><dt>Rationale</dt><dd>D1 is the keystone decision; making the <em>run</em> the durable entity dissolves the deterministic-process-vs-agent-vs-hybrid choice into a protocol question, and D4's "hardest to retrofit" concern disappears because every loop iteration is by definition a resume. It also makes mid-run harness changes and operator mid-run model swaps free.</dd></div>
+      <div><dt>Downsides</dt><dd>The journal + lease + reconcile machinery must exist before anything else works; the operator's Paseo substrate kills agents on daemon restart, so the spine must be robust to that reality; higher initial engineering cost than a session-bound prototype.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i2">
+    <div class="rank">2</div>
+    <h3>The evidence spine — D5 as five interlocking layers</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 80%</span>
+      <span class="chip">Complexity High</span>
+    </div>
+    <p>The evidence contract is built as a stack where each layer closes the residual trust gap of the layer below: <strong>(1) Harvest</strong> — Miah collects evidence itself (diffs, test exit codes, tool-call traces, workspace state) at dispatch boundaries, never agent self-reports; <strong>(2) Replay</strong> — acceptance is the verification contract re-ran clean in a fresh context, so corroborated proof is countable by construction; <strong>(3) Corroborator</strong> — one grading ladder (deterministic &gt; calibrated LLM-judge &gt; human) every gate composes; <strong>(4) Custody</strong> — every artifact carries a full custody chain (producer role, agent ID, take, timestamp, hash) over a hash-chained, HMAC-locked journal, so hearsay (a claim about its own work) is inadmissible and broken custody is refused at admission; <strong>(5) Falsification</strong> — every acceptance review states 2–3 runnable falsifying checks and records their outputs; only claims that survived recorded refutation count.</p>
+    <figure>
+      <svg viewBox="0 0 760 260" role="img" aria-label="Evidence spine five-layer stack">
+        <rect x="40" y="30" width="440" height="42" rx="6" fill="#ffffff" stroke="#5c6573"/>
+        <text x="55" y="56" font-size="13" fill="#232933">Falsification-first review — claims survive recorded refutation</text>
+        <rect x="40" y="78" width="440" height="42" rx="6" fill="#ffffff" stroke="#5c6573"/>
+        <text x="55" y="104" font-size="13" fill="#232933">Chain of custody — producer, ID, take, hash; hearsay refused</text>
+        <rect x="40" y="126" width="440" height="42" rx="6" fill="#ffffff" stroke="#5c6573"/>
+        <text x="55" y="152" font-size="13" fill="#232933">Corroborator — deterministic &gt; LLM-judge &gt; human</text>
+        <rect x="40" y="174" width="440" height="42" rx="6" fill="#ffffff" stroke="#5c6573"/>
+        <text x="55" y="200" font-size="13" fill="#232933">Acceptance-by-replay — verification contract re-runs clean</text>
+        <rect x="40" y="222" width="440" height="42" rx="6" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="55" y="248" font-size="13" fill="#215a3d" font-weight="600">Harvested traces — diffs, exit codes, workspace state</text>
+        <path d="M520 244 L520 52" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a2)"/>
+        <text x="528" y="47" font-size="10.5" fill="#5c6573">each layer closes the gap</text>
+        <text x="528" y="60" font-size="10.5" fill="#5c6573">of the layer below</text>
+        <defs>
+          <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>The stack builds from harvested traces up to falsification-first review; each layer closes the trust gap the layer below leaves open, and the weakest layer bounds the whole.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> agent-orchestration-research §2.6 ("Evidence = artifacts + traces that Miah collects itself… not agent self-reports"), §1.6 grader triage, §2.7 WORM + cryptographic signature; STRATEGY ("Specialist-agent claims are evidence inputs, not facts"). <strong>external:</strong> arXiv "Auditable Agents" five evidence dimensions; chain-of-custody and hearsay doctrine; Aider's reversible=autonomous rule.</dd></div>
+      <div><dt>Rationale</dt><dd>The corroborated-proof-rate metric is the most direct measure of the product's core promise; the spine turns that metric from a post-hoc judgment into a mechanism, and it is the component with the most callers in the product (every acceptance and escalation decision).</dd></div>
+      <div><dt>Downsides</dt><dd>Five layers is real machinery; LLM-judge calibration is a workload of its own; falsification checks can decay into ritual unless the reviewer has budget to actually run them.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i3">
+    <div class="rank">3</div>
+    <h3>The operator-time stack — D6 / D7 / D8 as one autonomy-control design</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 75%</span>
+      <span class="chip">Complexity Medium</span>
+    </div>
+    <p>A single mechanism answers "how much of the operator's attention, when": <strong>exception-only approval surface</strong> — the operator sees only risk-scored exceptions sized for a 10–30s decision while routine actions auto-proceed within plan-granted autonomy; <strong>batch-decision mode</strong> — escalations park with their evidence packs, the run continues on safe paths, and the operator resolves the batch at the next natural gate or final approval; <strong>attention as the effort ceiling</strong> — each run gets a finite budget of escalation interactions, depletion meaning a report-only tail that fails closed; <strong>thresholds as a journal-predicate engine</strong> — budget predicates over tokens, retries, escalations, corroboration, and wall-clock, evaluated by one engine at every autonomy boundary and calibrated from run cards rather than invented; <strong>approval provenance</strong> — every operator decision is a structured journal entry with a reason code, linked evidence, and optional conditions Miah auto-closes.</p>
+    <figure>
+      <svg viewBox="0 0 760 320" role="img" aria-label="Operator-time stack flow">
+        <rect x="30" y="40" width="150" height="54" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="105" y="68" text-anchor="middle" font-size="13" fill="#232933" font-weight="600">Unit decisions</text>
+        <rect x="240" y="40" width="220" height="54" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="350" y="68" text-anchor="middle" font-size="13" fill="#232933" font-weight="600">Risk scorer / predicates</text>
+        <rect x="60" y="160" width="200" height="50" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="160" y="181" text-anchor="middle" font-size="12" fill="#215a3d" font-weight="600">Auto-proceed</text>
+        <text x="160" y="197" text-anchor="middle" font-size="10" fill="#5c6573">routine · within autonomy</text>
+        <rect x="360" y="160" width="200" height="50" rx="8" fill="#faf0dc" stroke="#8a5a08"/>
+        <text x="460" y="181" text-anchor="middle" font-size="12" fill="#6f4a08" font-weight="600">Exception</text>
+        <text x="460" y="197" text-anchor="middle" font-size="10" fill="#5c6573">evidence pack parks</text>
+        <rect x="240" y="250" width="260" height="50" rx="8" fill="#eaf0f6" stroke="#35506b"/>
+        <text x="370" y="271" text-anchor="middle" font-size="12" fill="#35506b" font-weight="600">Operator resolves batch</text>
+        <text x="370" y="287" text-anchor="middle" font-size="10" fill="#5c6573">next gate or final approval</text>
+        <rect x="560" y="40" width="170" height="54" rx="8" fill="#eaf0f6" stroke="#35506b"/>
+        <text x="645" y="62" text-anchor="middle" font-size="11.5" fill="#35506b" font-weight="600">Attention budget</text>
+        <text x="645" y="79" text-anchor="middle" font-size="10" fill="#5c6573">depletion → report-only tail</text>
+        <path d="M180 67 L232 67" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+        <path d="M240 94 L240 152" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+        <path d="M380 94 L380 152" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+        <path d="M420 210 L420 242" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a3)"/>
+        <text x="150" y="135" text-anchor="middle" font-size="10.5" fill="#5c6573">routine</text>
+        <text x="430" y="135" text-anchor="middle" font-size="10.5" fill="#5c6573">exception</text>
+        <defs>
+          <marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Decisions are risk-scored first; routine actions proceed inside autonomy, exceptions park with evidence and are resolved in batches, and the whole surface is bounded by a metered attention budget.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> planning-brief D6 ("Escalations must reach an operator who may not be watching") and D7; VISION ("Routine intermediate decisions remain with Miah"); STRATEGY operator-effort-compliance metric. <strong>external:</strong> exception-only review as the scale answer, ~93% rubber-stamp approval fatigue, graduated evidence-gated autonomy dials, EU AI Act Art. 12/14 logging-and-oversight.</dd></div>
+      <div><dt>Rationale</dt><dd>Operator attention is the bounded resource the whole product is built around; today the effort ceiling is a post-mortem statistic — the stack makes it enforced-by-construction and turns approval fatigue from a vulnerability into a measured signal. Three frames converged on it.</dd></div>
+      <div><dt>Downsides</dt><dd>Auto-proceed needs trust tiers and risk scoring that take calibration to get right; batch-decision mode requires a careful definition of "safe paths"; a fatigue-blind implementation could silently widen gates.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i4">
+    <div class="rank">4</div>
+    <h3>The operator-owned amendment path — immutability with an escape valve</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 75%</span>
+      <span class="chip">Complexity Medium</span>
+    </div>
+    <p>The plan document never mutates; only the contract layer (scope, requirements, acceptance criteria) is what actually freezes. When reality drifts, the operator issues a <strong>change order</strong> — an operator-approved, journaled delta that locks into a new immutable snapshot, with re-approval scoped to the affected units — and every run's record ends with an <strong>as-built section</strong>: the operator-owned statement of reality-vs-plan that the next run starts from. Immutability applies to the changelog, not the content, and plan drift becomes mechanically measurable: drift is any mutation that is not an approved amendment.</p>
+    <figure>
+      <svg viewBox="0 0 760 220" role="img" aria-label="Amendment path versus mutation">
+        <text x="95" y="28" text-anchor="middle" font-size="12" fill="#8a5a08" font-weight="600">Mutation — replanning (rejected)</text>
+        <rect x="30" y="44" width="130" height="50" rx="8" fill="#faf0dc" stroke="#8a5a08"/>
+        <text x="95" y="74" text-anchor="middle" font-size="13" fill="#6f4a08" font-weight="600">Plan</text>
+        <path d="M34 48 L156 90" stroke="#8a5a08" stroke-width="2.5" fill="none"/>
+        <rect x="30" y="140" width="130" height="50" rx="8" fill="#faf0dc" stroke="#8a5a08"/>
+        <text x="95" y="162" text-anchor="middle" font-size="12" fill="#6f4a08" font-weight="600">Replan</text>
+        <text x="95" y="178" text-anchor="middle" font-size="10" fill="#5c6573">throws away banked evidence</text>
+        <text x="430" y="28" text-anchor="middle" font-size="12" fill="#215a3d" font-weight="600">Amendment — append-only changelog (the fix)</text>
+        <rect x="250" y="44" width="120" height="50" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="310" y="74" text-anchor="middle" font-size="13" fill="#215a3d" font-weight="600">Snapshot v1</text>
+        <rect x="410" y="44" width="180" height="50" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="500" y="64" text-anchor="middle" font-size="12" fill="#232933" font-weight="600">Change order</text>
+        <text x="500" y="80" text-anchor="middle" font-size="10" fill="#5c6573">operator-approved delta</text>
+        <rect x="630" y="44" width="110" height="50" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="685" y="74" text-anchor="middle" font-size="13" fill="#215a3d" font-weight="600">Snapshot v2</text>
+        <path d="M370 69 L402 69" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a4)"/>
+        <path d="M590 69 L622 69" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a4)"/>
+        <rect x="250" y="140" width="490" height="44" rx="8" fill="#eaf0f6" stroke="#35506b"/>
+        <text x="495" y="159" text-anchor="middle" font-size="12" fill="#35506b" font-weight="600">Append-only journal</text>
+        <text x="495" y="175" text-anchor="middle" font-size="10" fill="#5c6573">every amendment is a journaled, hash-chained delta · as-built record closes the run</text>
+        <path d="M370 94 L370 132" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a4)"/>
+        <defs>
+          <marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Rejected alternative: mutating the plan throws away banked evidence. The fix: operator-approved change orders append to an immutable, hash-chained changelog, and an as-built record closes each run.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> VISION ("Every run is locked to an immutable snapshot of that plan"; "changes to scope, requirements, or acceptance criteria require operator approval"). <strong>external:</strong> construction change orders and as-built drawings; stale-plan-no-replanning as the dominant failure mode of static plans — the immutability bet must answer that literature. Four frames converged here.</dd></div>
+      <div><dt>Rationale</dt><dd>The product's most distinctive decision (an immutable plan) is also its most exposed weakness (staleness); without an operator-owned change route, the escape valve is an abort that throws away banked evidence and progress. The change-order discipline answers the industry objection without surrendering immutability.</dd></div>
+      <div><dt>Downsides</dt><dd>Re-approval scoping (delta vs whole snapshot) needs definition; a loose amendment mechanism becomes de-facto replanning; the drift metric must distinguish approved amendments from unauthorized mutation.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i5">
+    <div class="rank">5</div>
+    <h3>Mechanical independence — D2 made structural</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 75%</span>
+      <span class="chip">Complexity Medium</span>
+    </div>
+    <p>Tester/reviewer independence stops being a role label and becomes a <strong>dispatch property</strong>: reviewers receive only the unit spec, acceptance criteria, and the harvested evidence pack — builder identity and builder-visible context are redacted; they run in a fresh worktree on a deliberately different model family; and the journal's acceptance entry is written from the <strong>reviewer's verification record, not the builder's claim</strong> (maker-checker: the checker's record is what posts). Independence becomes a testable property of the pipeline rather than a promise.</p>
+    <figure>
+      <svg viewBox="0 0 760 240" role="img" aria-label="Maker-checker independence lanes">
+        <text x="140" y="26" text-anchor="middle" font-size="11.5" fill="#5c6573" font-weight="600">MAKER LANE</text>
+        <rect x="30" y="38" width="220" height="50" rx="8" fill="#faf0dc" stroke="#8a5a08"/>
+        <text x="140" y="61" text-anchor="middle" font-size="12.5" fill="#6f4a08" font-weight="600">Builder worktree + context</text>
+        <rect x="330" y="38" width="220" height="50" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="440" y="61" text-anchor="middle" font-size="12.5" fill="#232933" font-weight="600">Artifacts harvested by Miah</text>
+        <path d="M250 63 L322 63" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a5)"/>
+        <line x1="20" y1="116" x2="740" y2="116" stroke="#8a5a08" stroke-width="1.2" stroke-dasharray="5 4"/>
+        <text x="30" y="134" font-size="11" fill="#6f4a08" font-weight="600">maker / checker separation — reviewer cannot see builder context</text>
+        <text x="140" y="176" text-anchor="middle" font-size="11.5" fill="#5c6573" font-weight="600">CHECKER LANE</text>
+        <rect x="30" y="188" width="380" height="44" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="220" y="207" text-anchor="middle" font-size="12" fill="#215a3d" font-weight="600">Evidence pack only</text>
+        <text x="220" y="222" text-anchor="middle" font-size="10" fill="#5c6573">builder redacted · fresh worktree · different model family</text>
+        <rect x="480" y="188" width="250" height="44" rx="8" fill="#eaf0f6" stroke="#35506b"/>
+        <text x="605" y="207" text-anchor="middle" font-size="12" fill="#35506b" font-weight="600">Acceptance entry posts</text>
+        <text x="605" y="222" text-anchor="middle" font-size="10" fill="#5c6573">from reviewer's record, not the claim</text>
+        <path d="M410 210 L472 210" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a5)"/>
+        <defs>
+          <marker id="a5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>The builder's context never reaches the reviewer; the reviewer gets a redacted evidence pack in a fresh, cross-family context, and what posts to the journal is the reviewer's verification, not the builder's claim.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> planning-brief D2 ("a tester that shares the builder's context is not independent"); agent-orchestration-research §2.4 (shared-context critique approximates self-correction); ecosystem-grounding (the operator's standing role→model map, cross-family audit, worktree isolation). <strong>external:</strong> banking dual control / four-eyes principle.</dd></div>
+      <div><dt>Rationale</dt><dd>Corroboration only means something if corroboration is actually independent; a reviewer who read the builder's outputs is a re-reader, not a check. Making independence a verifiable dispatch property is the structural enforcement D2 says the substrate lacks, and it composes with the operator's already-authored orchestration preferences.</dd></div>
+      <div><dt>Downsides</dt><dd>Redaction and context-freshness machinery adds dispatch complexity; a reviewer who genuinely needs the builder's transcript to judge gets a weaker hand, so the evidence pack must be complete on its own.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i6">
+    <div class="rank">6</div>
+    <h3>Run cards — the compounding artifact</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 80%</span>
+      <span class="chip">Complexity Low</span>
+    </div>
+    <p>Each run ends with one consolidated projection — plan, units, approvals, escalations, evidence links, cost, time, verdict — that is simultaneously the <strong>D6 operator surface</strong> (the final approval package), the <strong>metrics corpus</strong> for all four STRATEGY metrics (all measured from the run journal), and the <strong>calibration dataset</strong> for D7's threshold defaults. After a handful of runs, the cards make the operator's effort ceiling empirically grounded instead of guessed, and each run's validation rules train on what previous runs actually did.</p>
+    <figure>
+      <svg viewBox="0 0 760 230" role="img" aria-label="Run card fan-out">
+        <rect x="30" y="90" width="170" height="50" rx="8" fill="#e7f0ea" stroke="#2f6f4f"/>
+        <text x="115" y="112" text-anchor="middle" font-size="13" fill="#215a3d" font-weight="600">Run card</text>
+        <text x="115" y="128" text-anchor="middle" font-size="10" fill="#5c6573">journal projection</text>
+        <rect x="300" y="20" width="220" height="50" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="410" y="41" text-anchor="middle" font-size="12.5" fill="#232933" font-weight="600">Operator surface</text>
+        <text x="410" y="58" text-anchor="middle" font-size="10" fill="#5c6573">final approval package (D6)</text>
+        <rect x="300" y="90" width="220" height="50" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="410" y="111" text-anchor="middle" font-size="12.5" fill="#232933" font-weight="600">Metrics corpus</text>
+        <text x="410" y="128" text-anchor="middle" font-size="10" fill="#5c6573">all four STRATEGY metrics</text>
+        <rect x="300" y="160" width="220" height="50" rx="8" fill="#ffffff" stroke="#5c6573"/>
+        <text x="410" y="181" text-anchor="middle" font-size="12.5" fill="#232933" font-weight="600">Calibration</text>
+        <text x="410" y="198" text-anchor="middle" font-size="10" fill="#5c6573">D7 threshold defaults</text>
+        <path d="M200 110 L292 45" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a6)"/>
+        <path d="M200 115 L292 115" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a6)"/>
+        <path d="M200 120 L292 185" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a6)"/>
+        <path d="M300 185 L120 185" stroke="#5c6573" stroke-width="1.5" fill="none"/>
+        <path d="M120 185 L120 148" stroke="#5c6573" stroke-width="1.5" fill="none" marker-end="url(#a6)"/>
+        <text x="210" y="178" font-size="10.5" fill="#5c6573">each run cheaper to supervise</text>
+        <defs>
+          <marker id="a6" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#5c6573"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>One per-run artifact feeds the operator surface, the metrics corpus, and threshold calibration — and the calibration loop makes each subsequent run cheaper to supervise.</figcaption>
+    </figure>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> STRATEGY metrics "measured from final approval decisions in the run journal"; planning-brief D7 ("planning must at least fix the mechanism and defaults"); VISION step 9 (consolidated evidence package). <strong>external:</strong> auditability cards mirroring model cards.</dd></div>
+      <div><dt>Rationale</dt><dd>One artifact compounds in two directions — per-run operator value and cross-run metrics/calibration — and it is the bridge to every self-improving idea in the set: the repo's current empty <code>docs/findings/</code>, missing runbook, and absent solutions store can be fed by runs from run one.</dd></div>
+      <div><dt>Downsides</dt><dd>The schema is load-bearing (UI, audit artifact, and metric dataset in one), so it must be designed before run one or retrofitted later at real cost.</dd></div>
+    </dl>
+  </article>
+
+  <article id="i7">
+    <div class="rank">7</div>
+    <h3>Mechanical staging — protect the planning phase today</h3>
+    <div class="card-meta">
+      <span class="chip accent">Confidence 70%</span>
+      <span class="chip">Complexity Low</span>
+    </div>
+    <p>The staged-context protocol keeps the predecessor's prior-art digest out of brainstorming via a DO-NOT-READ marker — a convention that depends on every agent in the session obeying it, and one unrecorded read silently contaminates every decision the later adversarial pass tries to validate. Enforce it mechanically: relocate <code>docs/research/prior-art-paseo-supervisor.md</code> to the git-ignored <code>tmp/</code> directory during brainstorming so no tool or agent can anchor on it, and let the cross-check step restore it.</p>
+    <dl>
+      <div><dt>Basis</dt><dd><strong>direct:</strong> planning-brief prior-art handling (marker-staged digest, "open only at step 2"; "The plan must never silently inherit prior-art decisions"). <strong>reasoned:</strong> a marker is a promise by an actor whose context includes the file; anchoring is exactly what the cross-check and anti-sycophancy passes exist to catch, so it is the one step of the protocol that can fail silently and undetectably — a file move removes the failure entirely.</dd></div>
+      <div><dt>Rationale</dt><dd>The entire decision-quality apparatus of the planning phase (independent research, cross-check, adversarial probe) is undermined by one unrecorded read; mechanical enforcement is nearly free and makes the marker unbreakable.</dd></div>
+      <div><dt>Downsides</dt><dd>Only relevant to the current planning phase; adds a small ceremony step to the brainstorm workflow.</dd></div>
+    </dl>
+  </article>
+
+</section>
+
+<section id="rejection-summary">
+  <h2>Rejection Summary</h2>
+  <p>Forty-eight raw ideas across six frames merged into 30 candidates; the table below records every candidate cut, with a one-line reason. Two were refuted by fresh-context basis verification (misattribution / subject-replacement); the rest were folded into stronger survivors or fell below the cut.</p>
+  <table>
+    <thead>
+      <tr><th>Candidate</th><th>Reason rejected</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Journal as stateless supervisor</td><td>Folded into survivor 1 (durable-run spine).</td></tr>
+      <tr><td>Run as family of unit mini-runs</td><td>Folded into survivor 1.</td></tr>
+      <tr><td>Frozen run manifest at admission</td><td>Folded into survivor 1 — the manifest is the spine's snapshot base.</td></tr>
+      <tr><td>Plan-freshness monitors</td><td>Weaker than survivor 4 on the same staleness risk; lower leverage.</td></tr>
+      <tr><td>Miah harvests evidence itself</td><td>Folded into survivor 2 (evidence spine).</td></tr>
+      <tr><td>Acceptance-by-replay</td><td>Folded into survivor 2.</td></tr>
+      <tr><td>The corroborator (one grading ladder)</td><td>Folded into survivor 2.</td></tr>
+      <tr><td>Chain of custody + hearsay</td><td>Folded into survivor 2.</td></tr>
+      <tr><td>Falsification-first review</td><td>Folded into survivor 2.</td></tr>
+      <tr><td>Slate/take numbering</td><td>Granular idempotency/provenance refinement; carried inside survivor 1's machinery.</td></tr>
+      <tr><td>Exception-only approval surface</td><td>Folded into survivor 3 (operator-time stack).</td></tr>
+      <tr><td>Batch-decision mode</td><td>Folded into survivor 3.</td></tr>
+      <tr><td>Attention as the effort ceiling</td><td>Folded into survivor 3.</td></tr>
+      <tr><td>Predicate-engine thresholds</td><td>Folded into survivor 3.</td></tr>
+      <tr><td>Approval provenance (reason codes)</td><td>Folded into survivor 3.</td></tr>
+      <tr><td>Reconcile-then-continue resume</td><td>Folded into survivor 1.</td></tr>
+      <tr><td>The kill drill</td><td>Folded into survivor 1 — the spine's acceptance test.</td></tr>
+      <tr><td>Self-improving corpus + after-action reviews</td><td>Below cut; strong, but overlaps survivor 6 — better as a brainstorm extension of run cards.</td></tr>
+      <tr><td>Hold-point gates in the plan format</td><td>Depends on plan-format decisions (survivors 1/4) settling first; lower immediate leverage.</td></tr>
+      <tr><td>Miah as trustworthiness infrastructure</td><td><strong>Refuted by verification:</strong> subject-replacement — reframes Miah as general-purpose governance infrastructure, contradicting VISION's out-of-scope ("not a general-purpose… orchestration platform"); the sound layering clause is already carried by survivor 1.</td></tr>
+      <tr><td>Evidence-first autonomy widening (S4)</td><td>Overlaps survivor 3; the widening mechanic lives inside the predicate engine + run-card calibration.</td></tr>
+      <tr><td>The learning loop (S5)</td><td>Overlaps survivor 6 + the after-action candidate; run cards are the leverage point.</td></tr>
+      <tr><td>Governance-as-code layer (S6)</td><td><strong>Refuted by verification:</strong> same subject-replacement reframe as the infrastructure idea, plus a market claim that goes beyond repo grounding.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="composition-signal">
+  Composed 2026-08-05 by ce-ideate from a surprise-me ideation run on the Miah repository — 48 raw ideas across 6 frames, 30 candidates, 7 survivors, 2 refuted by basis verification.
+</footer>
+
+</div>
+</body>
+</html>
