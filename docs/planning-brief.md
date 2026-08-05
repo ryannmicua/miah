@@ -90,6 +90,15 @@ Ordered by dependency — D1 shapes everything below it.
 
 **Depends on:** D1, D2.
 
+## Prior art handling (staged context — operator-set, do not weaken)
+
+A direct predecessor of Miah exists: the heypogi "Paseo Plan Execution Supervisor" (planned 2026-07-28, implementation-ready, never built). The operator deliberately keeps it out of brainstorming context so Miah's decisions are made on standalone research, not anchoring.
+
+1. **Brainstorming runs without prior-art context.** Research inputs are the three files in `docs/research/` — `ecosystem-grounding.md` points to prior art but does not summarize its decisions. The full digest (`research/prior-art-paseo-supervisor.md`) is marker-staged: open only at step 2.
+2. **Cross-check phase — after decisions are drafted, not before.** Read the staged digest, then compare decision by decision against our drafted decisions. Agreement = corroboration; disagreement = a conflict to resolve deliberately with the operator.
+3. **Adversarial check.** After the cross-check, run the `anti-sycophancy` skill against the drafted decisions, explicitly probing for convergences that are unexamined rather than earned.
+4. Anything adopted from prior art is recorded as `prior-art adoption` with a one-line justification in the plan. The plan must never silently inherit prior-art decisions.
+
 ## Suggested session sequencing
 
 1. **Brainstorm 1 — form factor and agent model (D1, D2).** Highest leverage, most constrained by the resumability requirement. Exit with a decided architecture direction.
