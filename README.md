@@ -4,14 +4,16 @@
 
 ## Status
 
-This repository is a fresh scaffold. The product vision is not yet written down.
+The product vision is written and approved (`VISION.md`). The project is in Phase 2 — Planning: turning the vision into an implementation-ready plan.
 
 ## Getting started
 
-Run an agent from this directory and follow `AGENTS.md`. The first pass interviews you to flesh out the product vision, writes `VISION.md`, and rewrites `AGENTS.md` for the phase the project is in.
+Run an agent from this directory and follow `AGENTS.md`. In the current phase, work focuses on planning: read `VISION.md` and `STRATEGY.md`, then develop the implementation plan with the operator. `AGENTS.md` rewrites itself as the project advances into Building and Operating phases.
 
 ## Layout
 
 - `AGENTS.md` — phase-aware operating instructions; rewrites itself as the project advances
-- `VISION.md` — product vision (created during the first agent pass, once you run it)
+- `VISION.md` — canonical product vision (approved)
+- `STRATEGY.md` — derived strategic framing and planning priorities
+- `docs/` — durable planning artifacts, research notes, and (future) implementation plans
 - `tmp/` — scratch space; committed empty, contents ignored

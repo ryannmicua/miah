@@ -44,4 +44,5 @@ The approved vision defines Miah as a resumable plan supervisor that coordinates
 - When running `ce-strategy` in this repo, answer its interview from `VISION.md`'s content — do not improvise new product answers — and run `vision-strategy-align` on the result.
 - Use `tmp/` for throwaway scratch; never commit anything in it (it is git-ignored).
 - Save durable artifacts in the repository root or in `docs/`.
+- Keep `README.md` fresh and aligned with this file's **Current phase** and the repository layout: when this file is rewritten on a phase change, update the README's status, getting started, and layout sections to match.
 - When in doubt about what the operator wants, ask — one question at a time.
