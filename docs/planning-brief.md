@@ -90,6 +90,20 @@ Ordered by dependency — D1 shapes everything below it.
 
 **Depends on:** D1, D2.
 
+### D9. Plan preflight
+
+**Question:** What does "validate the plan for executability" (VISION run step 1) concretely check, when does it run, and what happens when it fails?
+
+**Why it matters:** Every other open decision assumes a plan that can actually be executed as written. A plan that is unexecutable — a unit referencing a file nothing creates, a dependency cycle, an acceptance criterion no one can grade — currently fails deep into a run, after agents have been dispatched and budget spent. This is the cheapest possible place to catch that class of error, and it is the only one that costs nothing when it fires.
+
+**Candidate direction (operator-raised, not decided):** a `miah preflight <plan>` command — a pure function over plan plus workspace, needing no run state, no lease, and no dispatched agents. Two callers, one implementation: the operator runs it while drafting, and admission runs it before acquiring the lease and refuses on failure. Candidate checks are structural (IDs, acceptance criteria present, dependency graph resolves and is acyclic), referential (every path or artifact a unit names either exists or is declared as an earlier unit's output), and verifiability (every acceptance criterion declares a grading tier from the D5 ladder). Open sub-questions: whether checks block or warn (and whether a severity dial is allowed at all), how units declare what they create, and whether a failed admission is simply a re-submitted new snapshot rather than an amendment. Also open: whether preflight is a one-time gate at admission, or a check that recurs — a plan's executability is a property of the workspace, and the workspace is what the run changes. Reasoning behind this last question is recorded in `docs/ideation/2026-08-06-preflight-shaping.md`; it is discussion input, not a decision.
+
+**Feeds:** D3 (the plan format must be statically checkable for this to exist), D5 (grading tiers must be declarable per criterion).
+
+**Depends on:** D3.
+
+**Note:** Distinct from the crash-recovery drill that belongs to D4 — preflight validates a plan and needs no runtime; the drill validates the runtime. Keep them separate.
+
 ## Prior art handling (staged context — operator-set, do not weaken)
 
 A direct predecessor of Miah exists: the heypogi "Paseo Plan Execution Supervisor" (planned 2026-07-28, implementation-ready, never built). The operator deliberately keeps it out of brainstorming context so Miah's decisions are made on standalone research, not anchoring.
@@ -102,11 +116,11 @@ A direct predecessor of Miah exists: the heypogi "Paseo Plan Execution Superviso
 ## Suggested session sequencing
 
 1. **Brainstorm 1 — form factor and agent model (D1, D2).** Highest leverage, most constrained by the resumability requirement. Exit with a decided architecture direction.
-2. **Brainstorm 2 — artifacts (D3, D4, D5).** Plan format, journal schema, evidence contract. These three must cohere with each other.
+2. **Brainstorm 2 — artifacts (D3, D4, D5, D9).** Plan format, journal schema, evidence contract, plan preflight. These must cohere with each other; preflight belongs here because it is the forcing function that makes the plan format machine-checkable rather than merely readable.
 3. **Planning session — everything to a unified plan (D6, D7, D8 resolved along the way).** Output to `docs/plans/`, operator approves, AGENTS.md advances to Phase 3.
 
 Sequencing is a suggestion; the operator may reorder or merge sessions.
 
 ## Exit criteria for this brief
 
-This brief is spent when an approved implementation plan exists in `docs/plans/` that answers D1–D8 (or explicitly defers a decision with the operator's consent). At that point, archive or delete this brief — the plan supersedes it.
+This brief is spent when an approved implementation plan exists in `docs/plans/` that answers D1–D9 (or explicitly defers a decision with the operator's consent). At that point, archive or delete this brief — the plan supersedes it.
