@@ -7,6 +7,7 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 product_contract_source: ce-brainstorm
 execution: code
+deepened: 2026-08-07
 ---
 
 # Miah Implementation Plan - Plan
@@ -290,7 +291,7 @@ These are the only open items; all others are resolved by this plan's decisions 
 
 - KTD8. **Lease heartbeat 30s / TTL 60s (configurable).** Governs R72, R39-R40. The heartbeat interval is shorter than the TTL to tolerate one missed heartbeat. A resumer waits TTL + one failed renewal attempt before taking a stale lease. On Windows 10, the heartbeat rewrite uses `fs.writeFileSync` to a temp file + `fs.renameSync` to the lease path (atomic on NTFS).
 
-- KTD9. **Per-agent max-duration default 15m (blocked until Paseo ships).** Governs R73, R4/R5. The value is set in config but is not enforceable until the Paseo daemon ships per-agent duration enforcement. The substrate probe checks for the feature; admission fails closed if absent. The plan sequences all other work (U1-U3, U6-U9) so they can be built and tested without the feature; only U4 (substrate probe + adapter) and U10 (full E2E with admission) are gated on the feature existing.
+- KTD9. **Per-agent max-duration default 15m (blocked until Paseo ships).** Governs R73, R4/R5. The value is set in config but is not enforceable until the Paseo daemon ships per-agent duration enforcement. The substrate probe checks for the feature; admission fails closed if absent. The plan sequences all other work (U1-U3, U6-U9) so they can be built and tested without the feature. U4's probe and fail-closed admission are built now (the probe honestly reports 'absent'). U10's full E2E is exercised against an injected fake probe (`test/fixtures/fake-substrate-probe.ts`, reports 'present') so Miah's pipeline is testable now; only validation against a live daemon that actually has the real feature is deferred until it ships.
 
 - KTD10. **Calibration bar: ≥15-case corpus, >14/15 agreement, ≤2 false-blocks, zero false-pass.** Governs R74, R48. Carried from prior-art adoption in the 002 plan. The zero-false-pass floor is mandatory (falsification-floor discipline). v1 ships with empty corpora — no profile has authority until the operator supplies calibration files at `~/.miah/calibration/<provider>-<model>.json`.
 
@@ -391,7 +392,7 @@ The implementation units are ordered so that:
 4. The full FSM and operator interface are built last.
 5. The kill drill is extended across U3 → U5 → U10 and is the first-class verification milestone.
 
-Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and U7 depend on U5 (need dispatch to have something to harvest and accept). Unit U8 depends on everything before it. U9 depends on U8 (needs the FSM for stop/escalate). U10 depends on all.
+U4's adapter and substrate probe can be built in parallel with U2 (both depend on U1 only); U4's admission gate (which composes preflight ∧ probe) is completed after U2 lands. Units U6 and U7 depend on U5 (need dispatch to have something to harvest and accept). Unit U8 depends on everything before it. U9 depends on U8 (needs the FSM for stop/escalate). U10 depends on all.
 
 ---
 
@@ -404,7 +405,7 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 | U1 | CLI skeleton and configuration | `package.json`, `src/index.ts`, `src/config.ts` | — |
 | U2 | Plan parser and preflight | `src/parser.ts`, `src/preflight.ts`, `src/snapshot.ts` | U1 |
 | U3 | Run store, journal, and lease | `src/run-store.ts`, `src/journal.ts`, `src/lease.ts`, `src/replay.ts` | U1, U2 |
-| U4 | Substrate probe and Paseo adapter | `src/adapter/paseo.ts`, `src/substrate-probe.ts`, `src/admission.ts` | U1 |
+| U4 | Substrate probe and Paseo adapter | `src/adapter/paseo.ts`, `src/substrate-probe.ts`, `src/admission.ts` | U1, U2 |
 | U5 | Dispatch pipeline (thin) | `src/dispatch.ts`, `src/packet.ts`, `src/envelope.ts` | U3, U4 |
 | U6 | Evidence harvest, custody, and postflight | `src/evidence.ts`, `src/custody.ts`, `src/postflight.ts` | U3, U5 |
 | U7 | Acceptance, grading, and gaps | `src/acceptance.ts`, `src/grading.ts`, `src/calibration.ts`, `src/gap.ts` | U3, U6 |
@@ -416,7 +417,7 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 
 - **Goal:** Stand up the TypeScript project, CLI entry point, command dispatch, and config defaults (D7 thresholds).
 - **Requirements:** R1 (standalone CLI), R63 (command surface), R80 (configurable thresholds), R83 (TS/Node), R84 (Windows portable), R70 (no network/daemon needed).
-- **Files:** `package.json`, `tsconfig.json`, `src/index.ts`, `src/config.ts`, `src/commands/index.ts`, `src/types.ts`
+- **Files:** `package.json`, `tsconfig.json`, `src/index.ts`, `src/config.ts`, `src/commands/index.ts`, `src/types.ts`, `test/portability/no-posix-only.test.ts`
 - **Approach:** Use `commander` for CLI parsing. Define a `Config` interface with all D7 threshold fields and defaults (K=50, heartbeat=30s, TTL=60s, max-duration=15m, max-takes=3, max-rework=2, concurrency=1, no-progress=3, calibration bar). Read `~/.miah/config.json` on startup; create with defaults if absent. Set up `npm test` with `vitest` or `jest`. The `miah` bin entry points to `dist/index.js`.
 - **Test Scenarios:**
   - `miah --version` prints the version.
@@ -425,13 +426,14 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
   - Config file created with defaults on first run if absent.
   - Config overrides from `~/.miah/config.json` are applied.
   - All file paths use `path.join` (cross-platform), not hardcoded separators.
+  - A portability scan (`test/portability/no-posix-only.test.ts`) asserts no load-bearing `src/**` code uses `flock`, `mkfifo`, Unix signals (`SIGTERM`/`SIGKILL`), or `kill(` with a PID.
 - **Verification:** `npm run build` compiles without errors; `npm test -- --grep "cli"` passes; `miah --help` renders the command surface.
 
 ### U2. Plan Parser and Preflight
 
 - **Goal:** Parse CE `ce-unified-plan/v1` documents into `units.json`, compute content-hash snapshots, and implement the pure preflight function.
 - **Requirements:** R22-R30, R55-R60 (preflight pure function, structural/referential/verifiability checks, block-only severity, failed admission = new snapshot).
-- **Files:** `src/parser.ts`, `src/preflight.ts`, `src/snapshot.ts`
+- **Files:** `src/parser.ts`, `src/preflight.ts`, `src/snapshot.ts`, `src/commands/preflight.ts`
 - **creates:** `src/parser.ts`, `src/preflight.ts`, `src/snapshot.ts`
 - **inputs:** none (standalone module)
 - **depends-on:** U1
@@ -450,12 +452,12 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 ### U3. Run Store, Journal, and Lease
 
 - **Goal:** Implement the append-only journal, lease.lock, replay-from-snapshot-plus-tail, and periodic state snapshots. The kill drill v1 (journal-level) is first tested here.
-- **Requirements:** R31-R42 (run store layout, journal, lease, replay, snapshot cadence K=50, kill drill property).
+- **Requirements:** R15 (single-writer journal serialization — carried from 001), R31-R42 (run store layout, journal, lease, replay, snapshot cadence K=50, kill drill property).
 - **Files:** `src/run-store.ts`, `src/journal.ts`, `src/lease.ts`, `src/replay.ts`, `src/manifest.ts`
 - **creates:** `src/run-store.ts`, `src/journal.ts`, `src/lease.ts`, `src/replay.ts`, `src/manifest.ts`
 - **inputs:** `src/types.ts` (U1), `src/parser.ts` (U2 for units.json), `src/snapshot.ts` (U2)
 - **depends-on:** U1, U2
-- **Approach:** Journal append: serialize event as JSON line, write to temp file, `fs.renameSync` to `journal.jsonl` (atomic on NTFS). Event schema: `{seq, type, timestamp, ...payload}` per R35. Lease: `lease.lock` = `{holder_id, acquired_at, last_heartbeat_at, ttl_s}`. Acquire: temp-write-then-rename (fail if target exists with fresh heartbeat). Heartbeat: rewrite heartbeat field every 30s while holding. Release: append `lease_released`, mark `lease.lock` terminal. Replay: read latest `snapshots/state-<seq>.json`, scan journal from seq+1 to tail, reconstruct derived state (per-unit acceptance, in-flight intents, open gaps, phase). Kill drill v1: write 50+ journal events, kill the process, resume, assert byte-identical reconstructed state.
+- **Approach:** Journal append: serialize event as JSON line, append via `fs.appendFileSync` (single write per event). A crash mid-write may produce a partial trailing line; replay validates each JSON line and truncates a malformed tail, restoring the last complete event. The atomic temp-write-then-rename primitive (D8-c, KTD2) is used for `lease.lock` only (it replaces the prior file — correct for the lease, but for an append-only journal it would discard prior events, so the journal uses append-not-replace). Event schema: `{seq, type, timestamp, ...payload}` per R35. Lease: `lease.lock` = `{holder_id, acquired_at, last_heartbeat_at, ttl_s}`. Acquire: temp-write-then-rename (fail if target exists with fresh heartbeat). Heartbeat: rewrite heartbeat field every 30s while holding. Release: append `lease_released`, mark `lease.lock` terminal. Replay: read latest `snapshots/state-<seq>.json`, scan journal from seq+1 to tail, reconstruct derived state (per-unit acceptance, in-flight intents, open gaps, phase). Kill drill v1: write 50+ journal events, kill the process, resume, assert byte-identical reconstructed state.
 - **Test Scenarios:**
   - Append 100 events; replay reconstructs all statuses correctly.
   - Snapshot at seq 50; replay from snapshot reconstructs state identically to full replay.
@@ -473,8 +475,8 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 - **Files:** `src/adapter/paseo.ts`, `src/substrate-probe.ts`, `src/admission.ts`
 - **creates:** `src/adapter/paseo.ts`, `src/substrate-probe.ts`, `src/admission.ts`
 - **inputs:** `src/config.ts` (U1), `src/preflight.ts` (U2)
-- **depends-on:** U1
-- **Approach:** Adapter implements the 5-capability contract (D2-a): `launch(prompt, opts) → handle`, `status(handle) → lifecycle`, `inspect(handle) → {provider, model, usage, mode, capabilities}`, `stop(handle)`, `cancel(handle)`. Each uses `paseo run --background --json`, `paseo inspect --json`, `paseo agent stop`, etc. via `child_process.execFile`. The substrate probe: (1) check max-duration — query `paseo run --help` for a `--max-duration`/`--expires-at` flag (none found → report `absent`); (2) check MCP injection scoping — read `~/.paseo/config.json` for `daemon.mcp.injectIntoAgents`; if true, check for per-agent scoping flags (none found → report `unscopable`); (3) check post-termination immutability — dispatch a throwaway agent to a temp worktree, terminate it, try to write to the worktree path, record whether the write succeeds (immutability absent) or fails (present). Admission gate: `preflight(plan, workspace) ∧ substrateProbe()`; if preflight fails → return structured failures; if probe reports max-duration absent → refuse; if probe reports MCP unscopable → refuse; both pass → proceed to lease + snapshot + journal.
+- **depends-on:** U1, U2
+- **Approach:** Adapter implements the 5-capability contract (D2-a): `launch(prompt, opts) → handle`, `status(handle) → lifecycle`, `inspect(handle) → {provider, model, usage, mode, capabilities}`, `stop(handle)`, `cancel(handle)`. Each uses `paseo run --background --json`, `paseo inspect --json`, `paseo agent stop`, etc. via `child_process.execFile`. The substrate probe: (1) check max-duration — query `paseo run --help` for a `--max-duration`/`--expires-at` flag (none found → report `absent`); (2) check MCP injection scoping — read `~/.paseo/config.json` for `daemon.mcp.injectIntoAgents`; if true, check for per-agent scoping flags (none found → report `unscopable`); (3) check post-termination immutability — dispatch a throwaway agent to a temp worktree, terminate it, try to write to the worktree path, record whether the write succeeds (immutability absent) or fails (present). Admission gate: `preflight(plan, workspace) ∧ substrateProbe()`; if preflight fails → return structured failures; if probe reports max-duration absent → refuse; if probe reports MCP unscopable → refuse; both pass → snapshot the admission-time config into the manifest (R80), acquire lease, write plan snapshot, open journal. The `SubstrateProbe` is behind an injectable interface defined in `src/substrate-probe.ts` so U10 can substitute `test/fixtures/fake-substrate-probe.ts` (reports all checks present) — this lets the full pipeline be E2E-tested against the live adapter now, while the real-probe tests (U10 substrate-fail-closed) use the real probe and stay gated.
 - **Test Scenarios:**
   - Substrate probe against live daemon reports `max-duration: absent` and `mcp_injection: unscopable` (with `injectIntoAgents: true`).
   - Admission against a valid plan fails closed with a message naming the missing `max-duration` mechanism (R4/R5, R86).
@@ -488,7 +490,7 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 ### U5. Dispatch Pipeline (Thin)
 
 - **Goal:** Implement dispatch_intent → adapter create → poll → terminate → read envelope for one specialist, sequentially (concurrency=1). This provides the first thin E2E. Kill drill v2 (dispatch-level) is tested here.
-- **Requirements:** R7-R9 (fresh specialist sessions), R13 (dispatch primitive), R16 (file envelopes), R17 (dispatch intent before adapter call), R36-R37 (dispatch intent/created/failed/terminated reconciliation).
+- **Requirements:** R7-R11 (fresh specialist sessions and dispatch independence — R7-R9, R10, R11 carried from 001), R13 (dispatch primitive), R16 (file envelopes), R17 (dispatch intent before adapter call), R36-R37 (dispatch intent/created/failed/terminated reconciliation).
 - **Files:** `src/dispatch.ts`, `src/packet.ts`, `src/envelope.ts`
 - **creates:** `src/dispatch.ts`, `src/packet.ts`, `src/envelope.ts`
 - **inputs:** `src/journal.ts` (U3), `src/adapter/paseo.ts` (U4), `src/types.ts` (U1)
@@ -546,7 +548,7 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 
 - **Goal:** Implement the supervisor step function that ties dispatch, evidence, acceptance, and phase transitions together; implement the full loop via `miah run` / `--once`.
 - **Requirements:** R1-R3 (standalone CLI, reconstructable core, lease+replay+reconcile), R12 (parallel support), R14 (dependency gating), R71-R82 (thresholds as runtime mechanisms), R82 (escalation triggers).
-- **Files:** `src/step.ts`, `src/fsm.ts`, `src/driver.ts`, `src/escalation.ts`
+- **Files:** `src/step.ts`, `src/fsm.ts`, `src/driver.ts`, `src/escalation.ts`, `src/commands/start.ts`, `src/commands/run.ts`
 - **creates:** `src/step.ts`, `src/fsm.ts`, `src/driver.ts`, `src/escalation.ts`
 - **inputs:** `src/run-store.ts` (U3), `src/dispatch.ts` (U5), `src/evidence.ts` (U6), `src/acceptance.ts` (U7), `src/types.ts` (U1)
 - **depends-on:** U2, U3, U4, U5, U6, U7
@@ -576,7 +578,9 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
   - `miah resolve` appends `escalation_resolved`; next `miah run` sees it and re-dispatches.
   - `miah approve` on an all-accepted run writes `run_terminal: complete`.
   - `miah reject --end` writes `run_terminal: rejected`.
+  - `miah reject --rework <unit-ids>` marks the specified units for re-dispatch without terminating the run.
   - `miah amend` with a plan that changes U2's `creates:` → new snapshot, `amendment_applied`, U2 marked for re-dispatch, U1 preserved.
+  - `miah amend` on a plan with a dependency chain (U3 depends on U2, U2 changes) → U2 AND transitive-dependent U3 marked for re-dispatch.
   - `miah list` shows all runs in `~/.miah/runs/`.
   - All operator actions journaled with identity, timestamp, decision.
 - **Verification:** `npm test -- --grep "status"` passes; `npm test -- --grep "stop"` passes; `npm test -- --grep "resolve"` passes; `npm test -- --grep "approve"` passes; `npm test -- --grep "amend"` passes.
@@ -585,13 +589,13 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 
 - **Goal:** Run a full Miah execution against a test CE plan with real Paseo specialists; pass the kill drill (first-class verification milestone); test the deadline-past-death refusal and the substrate-fail-closed admission.
 - **Requirements:** R2-R3 (reconstructable core), R5 (deadline refused), R6 (reconcile), R42 (kill drill property), R57 (substrate fail-closed), R90 (test approach), R63-R70 (operator interface E2E).
-- **Files:** `test/e2e/kill-drill.ts`, `test/e2e/full-run.ts`, `test/e2e/deadline-refusal.ts`, `test/e2e/substrate-fail-closed.ts`, `test/fixtures/test-plan.md`, `test/fixtures/test-plan-bad.md`
-- **creates:** `test/e2e/kill-drill.ts`, `test/e2e/full-run.ts`, `test/e2e/deadline-refusal.ts`, `test/e2e/substrate-fail-closed.ts`, `test/fixtures/test-plan.md`
+- **Files:** `test/e2e/kill-drill.ts`, `test/e2e/full-run.ts`, `test/e2e/deadline-refusal.ts`, `test/e2e/substrate-fail-closed.ts`, `test/fixtures/test-plan.md`, `test/fixtures/test-plan-bad.md`, `test/fixtures/fake-substrate-probe.ts`
+- **creates:** `test/e2e/kill-drill.ts`, `test/e2e/full-run.ts`, `test/e2e/deadline-refusal.ts`, `test/e2e/substrate-fail-closed.ts`, `test/fixtures/test-plan.md`, `test/fixtures/fake-substrate-probe.ts`
 - **inputs:** all prior units (U1-U9)
 - **depends-on:** U1, U2, U3, U4, U5, U6, U7, U8, U9
-- **Approach:** Test CE plan (`test/fixtures/test-plan.md`): 3 units — U1 creates `src/hello.py` (a Python hello-world module), U2 depends on U1, creates `src/greeter.py` (imports `hello.py`), U3 independent, creates `config/app.json`. Each unit has acceptance criteria with tiers (`deterministic` for the code, `calibrated-judge` for one criterion to exercise the calibration gate). Full run test: `miah start`, `miah run` to completion, `miah approve` — assert all units accepted, evidence harvested, integration completed, `approval-package.json` written. Kill drill test: `miah start`, `miah run`, kill mid-dispatch at U2, `miah run --once` → assert byte-identical state, reconcile intent-without-created, refuse work past deadline, continue to completion. Deadline-past-death test: simulate a deadline that passed while Miah was dead, on resume assert the dispatch is terminated and work is refused per R5. Substrate-fail-closed test: run `miah start` against the live daemon; assert admission fails with the max-duration-absent message.
+- **Approach:** Test CE plan (`test/fixtures/test-plan.md`): 3 units — U1 creates `src/hello.ts` (a TypeScript hello module), U2 depends on U1, creates `src/greeter.ts` (imports `hello.ts`), U3 independent, creates `config/app.json`. Using TypeScript (not Python) keeps the test environment single-runtime (Node only — Assumption 3) and avoids an unstated Python dependency. Each unit has acceptance criteria with tiers (`deterministic` for the code, `calibrated-judge` for one criterion to exercise the calibration gate). With empty default corpora (KTD10), the `calibrated-judge` criterion always escalates (no profile clears the bar) — the full-run test exercises the `escalation_raised` → `miah resolve --decision approve` → `escalation_resolved` → `gap_closed` → acceptance path for that criterion. Full run test uses an injected fake substrate probe (`test/fixtures/fake-substrate-probe.ts`, reporting max-duration present, MCP scoped, immutability present) so `miah start` proceeds despite the live daemon lacking the feature: `miah start`, `miah run` to completion, `miah approve` — assert all units accepted, evidence harvested, integration completed, `approval-package.json` written. The fake-probe seam is a test-only injection point on the `SubstrateProbe` interface (defined in U4); it lets U10 exercise the full pipeline against the live adapter without waiting for the max-duration feature to ship. The substrate-fail-closed test uses the real probe (live daemon) — it never uses the fake. Kill drill test uses the same injected fake probe (so `miah start` proceeds): `miah start`, `miah run`, kill mid-dispatch at U2, `miah run --once` → assert byte-identical state, reconcile intent-without-created, refuse work past deadline, continue to completion. Deadline-past-death test: simulate a deadline that passed while Miah was dead, on resume assert the dispatch is terminated and work is refused per R5. Substrate-fail-closed test: run `miah start` against the live daemon (real probe); assert admission fails with the max-duration-absent message.
 - **Test Scenarios:**
-  - Full run: admit → plan (U1) → implement (U1) → test → accept → implement (U2) → test → accept → implement (U3) → test → accept → awaitingApproval → approve → complete.
+  - Full run (with fake probe, KTD10 empty corpora): admit → implement (U1) → test → accept → implement (U2) → test (U2's `calibrated-judge` criterion escalates because no calibration exists → operator resolves via `miah resolve --decision approve` → `escalation_resolved` → `gap_closed` → accept) → implement (U3) → test → accept → awaitingApproval → approve → complete.
   - **Kill drill (first-class milestone):** kill at U2 mid-dispatch → resume → byte-identical state → intent reconciled → continue → complete.
   - Deadline-past-death: deadline expired during outage → resume → specialist terminated → work refused → `gap_recorded: deadline-exceeded`.
   - Substrate fail-closed: admission against live daemon → max-duration absent → admission refused → no journal created.
@@ -611,7 +615,7 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 - **Preflight standalone:** `miah preflight test/fixtures/test-plan.md` returns a green verdict; `miah preflight test/fixtures/test-plan-bad.md` returns structured failures.
 - **Admission fail-closed:** `npm test -- --grep "admission"` passes; admission against the live Paseo daemon fails with the max-duration-absent message.
 - **E2E:** `npm test -- --grep "e2e"` passes: full run, kill drill, deadline refusal, substrate fail-closed, operator interface (status/stop/resolve/approve/amend).
-- **Windows 10 + Git Bash:** the CLI and all file operations work on Windows 10 with Git Bash; no POSIX-only primitives are load-bearing (R84).
+- **Windows 10 + Git Bash:** the CLI and all file operations work on Windows 10 with Git Bash; no POSIX-only primitives are load-bearing (R84) — verified by `test/portability/no-posix-only.test.ts` (U1).
 
 ---
 
@@ -640,6 +644,6 @@ Units U2 and U4 can be built in parallel (both depend on U1 only). Units U6 and 
 
 ### Honest limits (what remains unverifiable until the Paseo feature ships)
 
-- **Per-agent max-duration enforcement (R4/R5):** cannot be tested end-to-end until the Paseo daemon ships the feature. The probe and fail-closed admission are tested; the actual enforcement is not. When the feature ships, update the substrate probe (KTD4) to pass, and re-run the full E2E suite.
+- **Per-agent max-duration enforcement (R4/R5):** cannot be tested end-to-end until the Paseo daemon ships the feature. The probe and fail-closed admission are tested; the actual enforcement is not. The full pipeline (U10 full run, U10 kill drill, U10 operator interface E2E) is exercised against an injected fake probe (`test/fixtures/fake-substrate-probe.ts`) that reports 'present' — this tests Miah's end, not Paseo's enforcement. The real-probe tests (substrate-fail-closed, admission gate) run against the live daemon and pass (they assert fail-closed, not success). When the real feature ships, drop the fake probe and re-run U10 against the live daemon.
 - **Post-termination workspace immutability (R46):** the probe records whatever the live daemon provides; if absent, the dual-hash T2-T3 check is the mitigation. Re-verify when Paseo ships an immutability guarantee.
 - **MCP injection per-agent scoping (R21):** no per-agent scoping exists in v0.3.0-beta.2. The fail-closed admission gate is tested; actual per-agent scoping is deferred until Paseo ships it. Until then, the operator must disable global injection.
