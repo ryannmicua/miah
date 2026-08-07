@@ -40,6 +40,14 @@ export interface RunConfig {
   max_takes: number;
   /** Max rework cycles per unit (R78, KTD13): default 2. */
   max_rework_cycles: number;
+  /**
+   * Run-level cost ceiling in USD (R81-R82). Absent/undefined when unset: the
+   * cost-ceiling budget predicate is inert until the operator sets it in
+   * `~/.miah/config.json` (`run.cost_ceiling_usd`). When set, the step
+   * escalates `cost-ceiling-exceeded` as soon as cumulative harvested usage
+   * cost exceeds the ceiling.
+   */
+  cost_ceiling_usd?: number;
 }
 
 /** Calibration bar for the calibrated-judge tier (R74, KTD10). */

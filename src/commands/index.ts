@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { loadConfig } from "../config";
 import { runPreflight, PREFLIGHT_FAILURE_EXIT_CODE } from "./preflight";
 import { runStart, ADMISSION_FAILURE_EXIT_CODE } from "./start";
+import { runCommand, RUN_BLOCKED_EXIT_CODE } from "./run";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
@@ -65,7 +66,16 @@ export function registerCommands(program: Command): void {
     .description("Run the looping driver (--once = one step and exit)")
     .argument("[run-id]", "run id to drive (defaults to the current run)")
     .option("--once", "run one step and exit")
-    .action(stub("run"));
+    .action((runId: string | undefined, opts: { once?: boolean }) => {
+      runCommand(runId, { once: opts.once ?? false })
+        .then((code) => {
+          process.exitCode = code;
+        })
+        .catch((error: unknown) => {
+          console.error(`miah run: ${error instanceof Error ? error.message : String(error)}`);
+          process.exitCode = RUN_BLOCKED_EXIT_CODE;
+        });
+    });
 
   program
     .command("status")
