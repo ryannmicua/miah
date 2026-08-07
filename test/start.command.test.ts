@@ -8,6 +8,8 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runStart } from "../src/commands/start";
+import { readJournalFile } from "../src/journal";
+import { resolveRunLayout, RunStore } from "../src/run-store";
 import { DEFAULT_CONFIG } from "../src/types";
 import { makeFakeProbe, makeFakeProbeReport } from "./fixtures/fake-substrate-probe";
 
@@ -100,5 +102,35 @@ describe("start command", () => {
     expect(stdout).toContain("[mcp-unscopable]");
     expect(stdout).toContain("injectIntoAgents");
     expect(stdout).toContain("disable");
+  });
+
+  it("releases the admission lease so a different holder acquires immediately (start -> run handoff)", async () => {
+    const basePath = makeTempDir();
+    const startHolder = "miah-start-holder";
+    const { code } = await capture(() =>
+      runStart(VALID_PLAN, {
+        probe: makeFakeProbe(),
+        basePath,
+        config: DEFAULT_CONFIG,
+        holderId: startHolder,
+      }),
+    );
+    expect(code).toBe(0);
+
+    const runsDir = path.join(basePath, "runs");
+    const runId = fs.readdirSync(runsDir)[0];
+    const { journalPath } = resolveRunLayout(basePath, runId);
+
+    const { events } = readJournalFile(journalPath);
+    const releaseEvents = events.filter((event) => event.type === "lease_released");
+    expect(releaseEvents).toHaveLength(1);
+    expect(releaseEvents[0].holder_id).toBe(startHolder);
+
+    const store = new RunStore({ basePath, runId, config: DEFAULT_CONFIG, holderId: startHolder });
+    const acquired = store.lease.acquire("miah-run-holder");
+    expect(acquired.ok).toBe(true);
+    if (acquired.ok) {
+      expect(acquired.reason).toBe("acquired");
+    }
   });
 });

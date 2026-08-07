@@ -9,6 +9,7 @@
 import * as fs from "fs";
 import { loadConfig, resolveConfigBasePath } from "../config";
 import { admitPlan, type AdmissionResult } from "../admission";
+import { RunStore } from "../run-store";
 import { PaseoSubstrateProbe, type SubstrateProbe } from "../substrate-probe";
 import { collectWorkspacePaths } from "./preflight";
 
@@ -79,5 +80,11 @@ export async function runStart(planPath: string, opts: RunStartOptions = {}): Pr
     workspacePaths,
   });
   printAdmission(result);
-  return result.ok ? 0 : ADMISSION_FAILURE_EXIT_CODE;
+  if (!result.ok || result.run === null) {
+    return ADMISSION_FAILURE_EXIT_CODE;
+  }
+
+  const store = new RunStore({ basePath, runId: result.run.runId, config, holderId });
+  store.lease.release(holderId);
+  return 0;
 }
