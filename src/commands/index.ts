@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { loadConfig } from "../config";
+import { runPreflight, PREFLIGHT_FAILURE_EXIT_CODE } from "./preflight";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
@@ -36,7 +37,12 @@ export function registerCommands(program: Command): void {
     .command("preflight")
     .description("Run preflight on a plan")
     .argument("<plan>", "path to the CE unified plan markdown file")
-    .action(stub("preflight"));
+    .action((plan: string) => {
+      const code = runPreflight(plan);
+      if (code !== 0) {
+        process.exitCode = code;
+      }
+    });
 
   program
     .command("start")

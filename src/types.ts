@@ -67,6 +67,85 @@ export interface Config {
   calibration: CalibrationConfig;
 }
 
+/**
+ * CE unified-plan / units.json shapes (R22-R30, R24). `units.json` is the
+ * parsed-once machine view keyed by U-ID; the journal, dispatcher, and
+ * acceptance predicate read this cached view and never re-parse the plan
+ * markdown mid-run (parse-once-and-cache principle, R24).
+ */
+
+/** Stable U-ID, e.g. "U1", "U2", ... Numeric, ascending, gaps accepted (R25). */
+export type UnitId = string;
+
+/** Acceptance criterion with its grading tier from the D5 ladder (R28). */
+export interface AcceptanceCriterion {
+  /** The criterion text as written in the plan's Acceptance block. */
+  text: string;
+  /**
+   * Declared tier: `deterministic | calibrated-judge | human` (D5 ladder,
+   * R47). `null` when the criterion carries no `tier:` declaration.
+   */
+  tier: string | null;
+}
+
+/** One Implementation Unit as parsed into the units.json machine view (R24). */
+export interface PlanUnit {
+  /** Stable U-ID (e.g. "U1"), matching the `U<number>.` H3 heading. */
+  id: UnitId;
+  /** Numeric part of the U-ID (1 for "U1"). */
+  number: number;
+  /** Unit title after the `U<number>.` prefix. */
+  title: string;
+  /** The `- **Goal:**` line. */
+  goal: string | null;
+  /** The `- **Requirements:**` line (requirement IDs, may be empty). */
+  requirements: string | null;
+  /**
+   * Repo-relative paths the unit promises to produce (R26). `null` when the
+   * unit does not declare a `creates:` field (a finding, per R26); an empty
+   * list is a present-but-empty declaration and is allowed.
+   */
+  creates: string[] | null;
+  /**
+   * Repo-relative paths the unit consumes (R27). `null` when the unit does
+   * not declare an `inputs:` field (a finding, per R27); an empty list is a
+   * present-but-empty declaration (allowed, e.g. for a root unit).
+   */
+  inputs: string[] | null;
+  /** U-IDs this unit depends on (empty for roots, per R25). */
+  dependsOn: UnitId[];
+  /**
+   * Acceptance criteria from the unit's Acceptance block (R25, R28). `null`
+   * when the unit does not carry an Acceptance block (a finding, per R25 and
+   * R56(a)); an empty list is a present-but-empty block.
+   */
+  acceptance: AcceptanceCriterion[] | null;
+}
+
+/** Parsed CE `ce-unified-plan/v1` document (frontmatter + units view). */
+export interface ParsedPlan {
+  /** `title` from the YAML frontmatter. */
+  title: string | null;
+  /** `artifact_contract` from the YAML frontmatter (e.g. `ce-unified-plan/v1`). */
+  artifactContract: string | null;
+  /** `execution` from the YAML frontmatter (`code` or `knowledge-work`). */
+  execution: string | null;
+  /** units.json-shaped map keyed by U-ID. */
+  units: Record<UnitId, PlanUnit>;
+  /** U-IDs in document order (numeric ascending; gaps accepted). */
+  unitIds: UnitId[];
+  /**
+   * U-IDs declared more than once in the document (R56(a): unique). Populated
+   * by the parser so the structural preflight can report them; the `units`
+   * record keeps the first occurrence.
+   */
+  duplicateIds: UnitId[];
+}
+
+/** D5 grading ladder tiers (R28, R47). */
+export const GRADING_TIERS = ["deterministic", "calibrated-judge", "human"] as const;
+export type GradingTier = (typeof GRADING_TIERS)[number];
+
 /** Default thresholds (D7, R71-R78). Used when config.json is absent. */
 export const DEFAULT_CONFIG: Config = {
   journal: {
