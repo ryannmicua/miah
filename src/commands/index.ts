@@ -1,8 +1,14 @@
 import { Command } from "commander";
-import { loadConfig } from "../config";
 import { runPreflight, PREFLIGHT_FAILURE_EXIT_CODE } from "./preflight";
 import { runStart, ADMISSION_FAILURE_EXIT_CODE } from "./start";
 import { runCommand, RUN_BLOCKED_EXIT_CODE } from "./run";
+import { runStatus, STATUS_ERROR_EXIT_CODE } from "./status";
+import { runStop, STOP_ERROR_EXIT_CODE } from "./stop";
+import { runResolve, RESOLVE_ERROR_EXIT_CODE, type ResolveDecision } from "./resolve";
+import { runApprove, APPROVE_ERROR_EXIT_CODE } from "./approve";
+import { runReject, REJECT_ERROR_EXIT_CODE } from "./reject";
+import { runAmend, AMEND_ERROR_EXIT_CODE } from "./amend";
+import { runList, LIST_ERROR_EXIT_CODE } from "./list";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
@@ -21,17 +27,37 @@ export const COMMANDS = [
   "list",
 ] as const;
 
-const NOT_IMPLEMENTED = "not yet implemented";
-
 /**
- * U1 shell: command bodies are stubs that read the config on startup (R80) and
- * report that the body is not yet implemented. Later units replace each stub.
+ * Wrap a command body so its numeric exit code becomes `process.exitCode` and
+ * any thrown error becomes a non-zero exit with a message on stderr. A
+ * synchronous body (status, list) sets the exit code synchronously; an async
+ * body is awaited and sets it on completion. Works for both.
  */
-function stub(name: string): () => void {
-  return () => {
-    loadConfig();
-    console.log(`miah ${name}: ${NOT_IMPLEMENTED}`);
-  };
+function runGuarded(action: () => number | Promise<number>): void {
+  let code: number | Promise<number>;
+  try {
+    code = action();
+  } catch (error) {
+    console.error(`miah: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (typeof code === "number") {
+    if (code !== 0) {
+      process.exitCode = code;
+    }
+    return;
+  }
+  code
+    .then((resolved) => {
+      if (resolved !== 0) {
+        process.exitCode = resolved;
+      }
+    })
+    .catch((error: unknown) => {
+      console.error(`miah: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    });
 }
 
 export function registerCommands(program: Command): void {
@@ -81,13 +107,17 @@ export function registerCommands(program: Command): void {
     .command("status")
     .description("Render the run state read from the journal without launching a driver")
     .argument("[run-id]", "run id (defaults to the current run)")
-    .action(stub("status"));
+    .action((runId: string | undefined) => {
+      runGuarded(() => runStatus(runId));
+    });
 
   program
     .command("stop")
     .description("Request a stop: journal operator_decision stop and set the stop-requested flag")
     .argument("<run-id>", "run id")
-    .action(stub("stop"));
+    .action((runId: string) => {
+      runGuarded(() => runStop(runId));
+    });
 
   program
     .command("resolve")
@@ -100,13 +130,19 @@ export function registerCommands(program: Command): void {
       /^(approve|deny|rework)$/i,
     )
     .option("--note <text>", "optional note attached to the decision")
-    .action(stub("resolve"));
+    .action((runId: string, escalationId: string, opts: { decision: string; note?: string }) => {
+      runGuarded(() =>
+        runResolve(runId, escalationId, opts.decision.toLowerCase() as ResolveDecision, opts.note),
+      );
+    });
 
   program
     .command("approve")
     .description("Approve a completed run (terminal: complete)")
     .argument("<run-id>", "run id")
-    .action(stub("approve"));
+    .action((runId: string) => {
+      runGuarded(() => runApprove(runId));
+    });
 
   program
     .command("reject")
@@ -114,17 +150,30 @@ export function registerCommands(program: Command): void {
     .argument("<run-id>", "run id")
     .option("--rework <unit-ids>", "comma-separated unit ids to route back to rework")
     .option("--end", "end the run without completion approval")
-    .action(stub("reject"));
+    .action((runId: string, opts: { rework?: string; end?: boolean }) => {
+      const rework =
+        opts.rework !== undefined
+          ? opts.rework
+              .split(",")
+              .map((id) => id.trim())
+              .filter((id) => id.length > 0)
+          : [];
+      runGuarded(() => runReject(runId, { rework, end: opts.end ?? false }));
+    });
 
   program
     .command("amend")
     .description("Apply a change order: new snapshot, scoped re-preflight, affected units re-dispatched")
     .argument("<run-id>", "run id")
     .argument("<new-plan>", "path to the replacement CE unified plan markdown file")
-    .action(stub("amend"));
+    .action((runId: string, newPlan: string) => {
+      runGuarded(() => runAmend(runId, newPlan));
+    });
 
   program
     .command("list")
     .description("List all runs in ~/.miah/runs/")
-    .action(stub("list"));
+    .action(() => {
+      runGuarded(() => runList());
+    });
 }
