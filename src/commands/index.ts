@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { loadConfig } from "../config";
 import { runPreflight, PREFLIGHT_FAILURE_EXIT_CODE } from "./preflight";
+import { runStart, ADMISSION_FAILURE_EXIT_CODE } from "./start";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
@@ -48,7 +49,16 @@ export function registerCommands(program: Command): void {
     .command("start")
     .description("Admit a plan: preflight + substrate probe + lease + first step")
     .argument("<plan>", "path to the CE unified plan markdown file")
-    .action(stub("start"));
+    .action((plan: string) => {
+      runStart(plan)
+        .then((code) => {
+          process.exitCode = code;
+        })
+        .catch((error: unknown) => {
+          console.error(`miah start: ${error instanceof Error ? error.message : String(error)}`);
+          process.exitCode = ADMISSION_FAILURE_EXIT_CODE;
+        });
+    });
 
   program
     .command("run")
