@@ -193,6 +193,7 @@ export const JOURNAL_EVENT_TYPES = [
   "dispatch_terminated",
   "reconcile_record",
   "evidence_harvested",
+  "custody_continuity_record",
   "result_envelope_observed",
   "acceptance_decision",
   "gap_recorded",
