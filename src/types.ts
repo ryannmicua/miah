@@ -278,3 +278,28 @@ export interface DerivedState {
   in_flight_intents: InFlightIntent[];
   open_gaps: OpenGap[];
 }
+
+/**
+ * Miah specialist roles (D8-i, R7-R11). Each specialist is a separately
+ * addressable external agent session created through the Paseo lifecycle
+ * adapter (R7); U5 dispatches one such specialist per unit attempt.
+ */
+export type SpecialistRole = "planner" | "builder" | "tester" | "reviewer";
+
+/**
+ * Role-to-model defaults (D8-i). Miah maps each role to a Paseo role plus a
+ * provider/model pair, falling back to the operator's
+ * `~/.paseo/orchestration-preferences.json` when present (D8-i). The D8-i
+ * table's "Provider/Model" cells carry the paseo `--provider` name and the
+ * full model id (the live CLI probe in U4 confirmed `--provider opencode` with
+ * model `opencode-go/deepseek-v4-flash`).
+ */
+export const D8I_ROLE_DEFAULTS: Record<
+  SpecialistRole,
+  { paseo_role: string; provider: string; model: string }
+> = {
+  planner: { paseo_role: "planning", provider: "codex", model: "gpt-5.6-sol" },
+  builder: { paseo_role: "impl", provider: "opencode", model: "opencode-go/deepseek-v4-flash" },
+  tester: { paseo_role: "audit", provider: "opencode", model: "opencode-go/glm-5.2" },
+  reviewer: { paseo_role: "audit", provider: "opencode", model: "opencode-go/glm-5.2" },
+};
