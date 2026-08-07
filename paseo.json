@@ -1,0 +1,7 @@
+{
+  "metadataGeneration": {
+    "commitMessage": {
+      "instructions": "Use conventional commits with scope"
+    }
+  }
+}
