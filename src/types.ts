@@ -171,3 +171,110 @@ export const DEFAULT_CONFIG: Config = {
     zero_false_pass: true,
   },
 };
+
+/**
+ * Journal and replay types (R33-R42, R71). The journal is a single append-only
+ * JSONL file of typed events, one per line, each carrying a global monotonic
+ * `seq` (R33). Replay reconstructs *derived* state only — statuses, decisions,
+ * IDs, hashes, references — never raw contexts, tool inputs, or specialist
+ * prose (R41, D7-a).
+ */
+
+/** Journal event type names (R35). */
+export const JOURNAL_EVENT_TYPES = [
+  "run_start",
+  "lease_acquired",
+  "lease_renewed",
+  "lease_released",
+  "journal_snapshot",
+  "dispatch_intent",
+  "dispatch_created",
+  "dispatch_failed",
+  "dispatch_terminated",
+  "reconcile_record",
+  "evidence_harvested",
+  "result_envelope_observed",
+  "acceptance_decision",
+  "gap_recorded",
+  "gap_closed",
+  "rework_started",
+  "escalation_raised",
+  "escalation_resolved",
+  "operator_decision",
+  "amendment_applied",
+  "phase_transition",
+  "run_terminal",
+] as const;
+
+/** The canonical journal event types (R35). */
+export type JournalEventType = (typeof JOURNAL_EVENT_TYPES)[number];
+
+/**
+ * One journaled event (R35): `{seq, type, timestamp, ...payload}`. `seq` is
+ * global and monotonic under the lease holder (R33); `timestamp` is Miah's
+ * observation timestamp (R34); the remaining keys carry the type-specific
+ * payload.
+ */
+export interface JournalEvent {
+  seq: number;
+  type: string;
+  timestamp: number;
+  [payloadKey: string]: unknown;
+}
+
+/** Per-unit state statuses (R64, R42). */
+export type UnitStatus = "accepted" | "in_flight" | "rework" | "blocked" | "not_started";
+
+/**
+ * A dispatch intent reconstructed from the journal that has no terminal
+ * follow-up event yet (R42: in-flight intents). A `dispatch_intent` alone is
+ * never enough to advance a unit past dispatch (R37).
+ */
+export interface InFlightIntent {
+  seq: number;
+  unit_id: UnitId;
+  role: string;
+  take: number;
+  idempotency_key: string;
+  packet_hash: string;
+  deadline: string;
+  provider: string;
+  model: string;
+  agent_id: string | null;
+  workspace_id: string | null;
+  base_commit: string | null;
+}
+
+/** An open evidence gap: a `gap_recorded` without a matching `gap_closed` (R42). */
+export interface OpenGap {
+  unit_id: UnitId;
+  criterion: string;
+  reason: string;
+  recorded_seq: number;
+}
+
+/** Derived per-unit state (R41). */
+export interface DerivedUnitState {
+  status: UnitStatus;
+  takes: number;
+  rework_cycles: number;
+  last_acceptance: "accept" | "not_accepted" | null;
+}
+
+/**
+ * The supervisor-derived state that replay reconstructs (R42): unit acceptance
+ * decisions, in-flight intents, open evidence gaps, and the run phase. This is
+ * what state snapshots serialize (R41) — derived data only, no raw context.
+ */
+export interface DerivedState {
+  /** Highest journal seq applied to this state. */
+  seq: number;
+  /** Latest `phase_transition.to`; the pre-transition sentinel is "not-started". */
+  phase: string;
+  run_id: string | null;
+  plan_hash: string | null;
+  terminal: string | null;
+  units: Record<UnitId, DerivedUnitState>;
+  in_flight_intents: InFlightIntent[];
+  open_gaps: OpenGap[];
+}
