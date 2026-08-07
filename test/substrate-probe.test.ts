@@ -23,6 +23,17 @@ import {
 
 const tempDirs: string[] = [];
 
+/**
+ * Stable scratch repo for the live probe's throwaway immutability dispatch. A
+ * FIXED path (not a random mkdtemp) so the Paseo daemon derives at most one
+ * project record for it across runs, instead of one orphan project per
+ * full-suite run.
+ */
+const LIVE_SCRATCH_DIR = path.join(os.tmpdir(), "miah-probe-scratch");
+const LIVE_SCRATCH_PROJECT_NAME = path.basename(LIVE_SCRATCH_DIR);
+const PROJECTS_REGISTRY = path.join(os.homedir(), ".paseo", "projects", "projects.json");
+const WORKSPACES_REGISTRY = path.join(os.homedir(), ".paseo", "projects", "workspaces.json");
+
 function makeTempDir(prefix = "miah-probe-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempDirs.push(dir);
@@ -288,54 +299,50 @@ describe("substrate probe (live daemon)", () => {
   it.runIf(cliAvailable())(
     "reports honestly against the live paseo CLI: max-duration absent, MCP per config, immutability recorded",
     async () => {
-      const repo = makeTempDir("miah-probe-repo-");
-      const seed = path.join(repo, "seed.txt");
-      fs.writeFileSync(seed, "seed");
-      git(repo, "init", "-b", "main");
-      git(repo, "config", "user.email", "probe@local");
-      git(repo, "config", "user.name", "probe");
-      git(repo, "add", "-A");
-      git(repo, "commit", "-qm", "seed");
+      try {
+        ensureLiveScratchRepo(LIVE_SCRATCH_DIR);
+        const probe = new PaseoSubstrateProbe({
+          provider: "opencode",
+          model: "opencode-go/deepseek-v4-flash",
+          title: "miah-u4-probe-live",
+          cwd: LIVE_SCRATCH_DIR,
+        });
+        const report = await probe.run();
 
-      const probe = new PaseoSubstrateProbe({
-        provider: "opencode",
-        model: "opencode-go/deepseek-v4-flash",
-        title: "miah-u4-probe-live",
-        cwd: repo,
-      });
-      const report = await probe.run();
+        // (a) Honest max-duration: the live CLI v0.3.0-beta.2 has no flag.
+        expect(report.max_duration.status).toBe("absent");
+        expect(report.max_duration.evidence.join(" ")).toContain("no --max-duration");
 
-      // (a) Honest max-duration: the live CLI v0.3.0-beta.2 has no flag.
-      expect(report.max_duration.status).toBe("absent");
-      expect(report.max_duration.evidence.join(" ")).toContain("no --max-duration");
+        // (b) Honest MCP verdict per the live daemon config.
+        const realConfigPath = path.join(os.homedir(), ".paseo", "config.json");
+        const globalInjection =
+          fs.existsSync(realConfigPath)
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(fs.readFileSync(realConfigPath, "utf8")) as {
+                    daemon?: { mcp?: { injectIntoAgents?: unknown } };
+                  };
+                  return parsed?.daemon?.mcp?.injectIntoAgents === true;
+                } catch {
+                  return false;
+                }
+              })()
+            : false;
+        if (globalInjection) {
+          expect(report.mcp_injection.status).toBe("unscopable");
+          expect(report.mcp_injection.global_injection_enabled).toBe(true);
+          expect(report.mcp_injection.per_agent_scoping).toBe(false);
+        } else {
+          expect(report.mcp_injection.status).toBe("disabled");
+        }
 
-      // (b) Honest MCP verdict per the live daemon config.
-      const realConfigPath = path.join(os.homedir(), ".paseo", "config.json");
-      const globalInjection =
-        fs.existsSync(realConfigPath)
-          ? (() => {
-              try {
-                const parsed = JSON.parse(fs.readFileSync(realConfigPath, "utf8")) as {
-                  daemon?: { mcp?: { injectIntoAgents?: unknown } };
-                };
-                return parsed?.daemon?.mcp?.injectIntoAgents === true;
-              } catch {
-                return false;
-              }
-            })()
-          : false;
-      if (globalInjection) {
-        expect(report.mcp_injection.status).toBe("unscopable");
-        expect(report.mcp_injection.global_injection_enabled).toBe(true);
-        expect(report.mcp_injection.per_agent_scoping).toBe(false);
-      } else {
-        expect(report.mcp_injection.status).toBe("disabled");
-      }
-
-      // (c) Immutability: recorded whatever the live daemon provides.
-      expect(["present", "absent", "unverifiable"]).toContain(report.immutability.status);
-      if (report.immutability.status === "absent") {
-        expect(report.caveats.join(" ")).toContain("post-termination-immutability-absent");
+        // (c) Immutability: recorded whatever the live daemon provides.
+        expect(["present", "absent", "unverifiable"]).toContain(report.immutability.status);
+        if (report.immutability.status === "absent") {
+          expect(report.caveats.join(" ")).toContain("post-termination-immutability-absent");
+        }
+      } finally {
+        await cleanupLiveProbeArtifacts();
       }
     },
     90_000,
@@ -363,4 +370,129 @@ function cliAvailable(): boolean {
 
 function git(cwd: string, ...args: string[]): void {
   execFileSync("git", args, { cwd, stdio: "ignore" });
+}
+
+/**
+ * Ensure the stable live-probe scratch repo exists as a fresh git repo. The
+ * path is FIXED per run so the Paseo daemon derives the same project record;
+ * the repo is re-seeded deterministically so repeated runs are identical.
+ */
+function ensureLiveScratchRepo(dir: string): void {
+  if (fs.existsSync(dir) && !fs.existsSync(path.join(dir, ".git"))) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, "init", "-b", "main");
+  git(dir, "config", "user.email", "probe@local");
+  git(dir, "config", "user.name", "probe");
+  git(dir, "worktree", "prune");
+  const seed = path.join(dir, "seed.txt");
+  fs.rmSync(seed, { force: true });
+  fs.writeFileSync(seed, "seed");
+  git(dir, "add", "-A");
+  try {
+    git(dir, "commit", "-qm", "seed");
+  } catch {
+    // The seed is already committed from a previous run.
+  }
+}
+
+/**
+ * Best-effort teardown for the live probe: archive any workspace still bound
+ * to the scratch project, drop the project record the run derived (leaving the
+ * daemon registries exactly as they were before the run), and remove the
+ * scratch repo. Runs even when the probe itself failed.
+ */
+async function cleanupLiveProbeArtifacts(): Promise<void> {
+  try {
+    const active = JSON.parse(runCli(["workspace", "ls", "--json"])) as Array<{
+      workspaceId: string;
+      project: string;
+    }>;
+    for (const workspace of active) {
+      if (workspace.project === LIVE_SCRATCH_PROJECT_NAME) {
+        try {
+          runCli(["workspace", "archive", workspace.workspaceId]);
+        } catch {
+          // best effort
+        }
+      }
+    }
+  } catch {
+    // best effort
+  }
+  removeLiveScratchProjectRecord();
+  try {
+    fs.rmSync(LIVE_SCRATCH_DIR, { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
+}
+
+/** Remove the project record the probe run derived for the stable scratch repo. */
+function removeLiveScratchProjectRecord(): void {
+  try {
+    if (!fs.existsSync(PROJECTS_REGISTRY)) {
+      return;
+    }
+    const projects = JSON.parse(fs.readFileSync(PROJECTS_REGISTRY, "utf8")) as Array<{
+      projectId: string;
+      rootPath: string;
+      archivedAt: string | null;
+    }>;
+    const scratchIdentities = identityPaths(LIVE_SCRATCH_DIR);
+    const matches = projects.filter(
+      (project) =>
+        project.archivedAt === null &&
+        scratchIdentities.includes(normalizeIdentityPath(project.rootPath)),
+    );
+    if (matches.length === 0) {
+      return;
+    }
+    const referenced =
+      fs.existsSync(WORKSPACES_REGISTRY) &&
+      (JSON.parse(fs.readFileSync(WORKSPACES_REGISTRY, "utf8")) as Array<{
+        projectId: string;
+        archivedAt: string | null;
+      }>).some(
+        (workspace) =>
+          workspace.archivedAt === null &&
+          matches.some((match) => match.projectId === workspace.projectId),
+      );
+    if (referenced) {
+      return;
+    }
+    const removed = new Set(matches.map((match) => match.projectId));
+    fs.writeFileSync(
+      PROJECTS_REGISTRY,
+      JSON.stringify(projects.filter((project) => !removed.has(project.projectId)), null, 2) + "\n",
+      "utf8",
+    );
+  } catch {
+    // best effort
+  }
+}
+
+/** Case-folded, separator-normalized path identity used by the daemon's registries. */
+function normalizeIdentityPath(value: string): string {
+  return path.resolve(value).replace(/[\\/]+/g, "\\").toLowerCase();
+}
+
+/** The daemon stores realpath'd roots; compare against both variants. */
+function identityPaths(value: string): string[] {
+  const variants = [normalizeIdentityPath(value)];
+  try {
+    variants.push(normalizeIdentityPath(fs.realpathSync(value)));
+  } catch {
+    // keep the plain variant
+  }
+  return [...new Set(variants)];
+}
+
+/** Run a paseo CLI command synchronously and return its stdout. */
+function runCli(args: string[]): string {
+  const invocation = resolveCliInvocation();
+  return execFileSync(invocation.file, [...invocation.argsPrefix, ...args], {
+    encoding: "utf8",
+  });
 }
