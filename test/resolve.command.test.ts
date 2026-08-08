@@ -6,11 +6,13 @@
  * or acceptance (approve). A run paused in Attention resumes to Ready so the
  * next `miah run` re-dispatches.
  */
+import * as fs from "fs";
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { admitPlan } from "../src/admission";
 import { runCommand } from "../src/commands/run";
 import { runResolve } from "../src/commands/resolve";
+import { writeApprovalPackage } from "../src/driver";
 import { ensurePhase } from "../src/fsm";
 import { raiseEscalation, unresolvedEscalations } from "../src/escalation";
 import { readJournalFile } from "../src/journal";
@@ -271,6 +273,71 @@ describe("resolve command", () => {
     ).toBe(true);
     expect(store.replay().state.units.U1.status).toBe("accepted");
     expect(unresolvedEscalations(store)).toHaveLength(0);
+  });
+
+  it("approve with multiple open gaps journals a gap_closed per gap so the approval package lists every close reason (R50, M1)", async () => {
+    const run = await admit();
+    const store = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    // Two open gaps on U1; the escalation addresses only one criterion.
+    store.append("gap_recorded", {
+      unit_id: "U1",
+      criterion: "behaves per contract",
+      reason: "reviewer could not verify",
+    });
+    store.append("gap_recorded", {
+      unit_id: "U1",
+      criterion: "meets requirements",
+      reason: "missing evidence",
+    });
+    const raised = raiseEscalation(store, {
+      unit_id: "U1",
+      trigger: "repeatedly-fails",
+      reason: "max takes exceeded for U1 (R77)",
+      criterion: "behaves per contract",
+    });
+    ensurePhase(store, "Attention");
+    store.lease.release(run.holderId);
+    expect(store.stateSnapshot().open_gaps).toHaveLength(2);
+
+    const { code } = await captureRunResolve(
+      run.runId,
+      raised.escalation_id,
+      "approve",
+      "operator accepted",
+      run.basePath,
+      run.config,
+    );
+    expect(code).toBe(0);
+
+    // The accept decision superseded every open gap: derived state has none.
+    const state = store.replay().state;
+    expect(state.units.U1.status).toBe("accepted");
+    expect(state.open_gaps).toHaveLength(0);
+
+    // The approval package lists BOTH gap close reasons (the escalation
+    // criterion's + the implicitly-closed one), so nothing disappears silently.
+    const pkgPath = writeApprovalPackage(store);
+    expect(pkgPath).not.toBeNull();
+    const pkg = JSON.parse(fs.readFileSync(pkgPath as string, "utf8"));
+    const closes = pkg.gap_close_reasons as Array<{
+      unit_id: string;
+      criterion: string;
+      close_reason: string;
+    }>;
+    expect(closes).toHaveLength(2);
+    expect(closes.map((g) => g.criterion).sort()).toEqual([
+      "behaves per contract",
+      "meets requirements",
+    ]);
+    expect(closes.every((g) => g.unit_id === "U1")).toBe(true);
+    // The implicitly-closed gap carries the R50 operator-approval reason.
+    const implicit = closes.find((g) => g.criterion === "meets requirements");
+    expect(implicit?.close_reason).toBe("operator-approval");
   });
 
   it("returns non-zero when the escalation is not open", async () => {

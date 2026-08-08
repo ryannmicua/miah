@@ -104,6 +104,20 @@ export async function runResolve(
           close_reason: note ?? "operator approved the escalation",
         });
       }
+      // Acceptance supersedes every remaining open gap on the unit (replay
+      // drops them on `acceptance_decision: accept`). Journal a `gap_closed`
+      // per remaining gap BEFORE the acceptance so the approval package's
+      // `gap_close_reasons` list stays complete and R50's "a problem cannot
+      // disappear silently" holds. The operator's approval is the close reason.
+      for (const gap of store.stateSnapshot().open_gaps) {
+        if (gap.unit_id === unitId) {
+          store.append("gap_closed", {
+            unit_id: unitId,
+            criterion: gap.criterion,
+            close_reason: "operator-approval",
+          });
+        }
+      }
       store.append("acceptance_decision", {
         unit_id: unitId,
         decision: "accept",
