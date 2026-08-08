@@ -215,9 +215,4 @@ export class Journal {
     const { events } = readJournalFile(this.journalPath);
     return events;
   }
-
-  /** Atomically drop a malformed trailing line; returns whether one existed. */
-  repair(): boolean {
-    return repairJournalTail(this.journalPath);
-  }
 }

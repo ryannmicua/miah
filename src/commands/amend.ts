@@ -20,7 +20,6 @@
  * (R69): an `operator_decision: amend` event precedes `amendment_applied`.
  */
 import * as fs from "fs";
-import * as path from "path";
 import { PaseoCliAdapter, type PaseoAdapter } from "../adapter/paseo";
 import { loadConfig, resolveConfigBasePath } from "../config";
 import { ensurePhase } from "../fsm";
@@ -28,7 +27,7 @@ import { readManifest } from "../manifest";
 import { parsePlan } from "../parser";
 import { preflightPlan } from "../preflight";
 import { resolveRunLayout, RunStore } from "../run-store";
-import { canonicalizePlan, computeContentHash, type SnapshotResult } from "../snapshot";
+import { writeSnapshot } from "../snapshot";
 import { readUnitsFromStore } from "../step";
 import type { Config, PlanUnit, UnitId } from "../types";
 import { collectWorkspacePaths } from "./preflight";
@@ -110,20 +109,6 @@ export function affectedUnits(changed: UnitId[], units: Record<UnitId, PlanUnit>
     }
   }
   return [...affected].sort();
-}
-
-/** Write a plan snapshot at a specific version (R68: new version, never v1). */
-function writeSnapshotVersion(
-  planText: string,
-  targetDir: string,
-  version: number,
-): SnapshotResult {
-  const canonicalContent = canonicalizePlan(planText);
-  const hash = computeContentHash(canonicalContent);
-  const filePath = path.join(targetDir, `plan-snapshot.v${version}.md`);
-  fs.mkdirSync(targetDir, { recursive: true });
-  fs.writeFileSync(filePath, canonicalContent, "utf8");
-  return { filePath, hash, canonicalContent };
 }
 
 /**
@@ -218,11 +203,10 @@ export async function runAmend(
     // KTD16).
     const previous = findLatestPlanSnapshot(layout);
     const version = (previous?.version ?? 1) + 1;
-    const snapshot = writeSnapshotVersion(newPlanText, layout.root, version);
-    const previousHash =
-      previous !== null && currentSnapshotHash(previous.filePath) !== null
-        ? (currentSnapshotHash(previous.filePath) as string)
-        : manifest.plan_hash;
+    const snapshot = writeSnapshot(newPlanText, layout.root, `plan-snapshot.v${version}.md`);
+    const previousSnapshotHash =
+      previous !== null ? currentSnapshotHash(previous.filePath) : null;
+    const previousHash = previousSnapshotHash !== null ? previousSnapshotHash : manifest.plan_hash;
 
     // The parsed-once machine view (R24) follows the new plan.
     fs.writeFileSync(layout.unitsJsonPath, `${JSON.stringify(newUnits, null, 2)}\n`, "utf8");

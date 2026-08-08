@@ -1,14 +1,14 @@
 import { Command } from "commander";
-import { runPreflight, PREFLIGHT_FAILURE_EXIT_CODE } from "./preflight";
-import { runStart, ADMISSION_FAILURE_EXIT_CODE } from "./start";
-import { runCommand, RUN_BLOCKED_EXIT_CODE } from "./run";
-import { runStatus, STATUS_ERROR_EXIT_CODE } from "./status";
-import { runStop, STOP_ERROR_EXIT_CODE } from "./stop";
-import { runResolve, RESOLVE_ERROR_EXIT_CODE, type ResolveDecision } from "./resolve";
-import { runApprove, APPROVE_ERROR_EXIT_CODE } from "./approve";
-import { runReject, REJECT_ERROR_EXIT_CODE } from "./reject";
-import { runAmend, AMEND_ERROR_EXIT_CODE } from "./amend";
-import { runList, LIST_ERROR_EXIT_CODE } from "./list";
+import { runPreflight } from "./preflight";
+import { runStart } from "./start";
+import { runCommand } from "./run";
+import { runStatus } from "./status";
+import { runStop } from "./stop";
+import { runResolve, type ResolveDecision } from "./resolve";
+import { runApprove } from "./approve";
+import { runReject } from "./reject";
+import { runAmend } from "./amend";
+import { runList } from "./list";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
@@ -31,14 +31,15 @@ export const COMMANDS = [
  * Wrap a command body so its numeric exit code becomes `process.exitCode` and
  * any thrown error becomes a non-zero exit with a message on stderr. A
  * synchronous body (status, list) sets the exit code synchronously; an async
- * body is awaited and sets it on completion. Works for both.
+ * body is awaited and sets it on completion. `errorPrefix` names the command
+ * in the stderr message. Works for both.
  */
-function runGuarded(action: () => number | Promise<number>): void {
+function runGuarded(action: () => number | Promise<number>, errorPrefix = "miah"): void {
   let code: number | Promise<number>;
   try {
     code = action();
   } catch (error) {
-    console.error(`miah: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`${errorPrefix}: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
     return;
   }
@@ -55,7 +56,7 @@ function runGuarded(action: () => number | Promise<number>): void {
       }
     })
     .catch((error: unknown) => {
-      console.error(`miah: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`${errorPrefix}: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 1;
     });
 }
@@ -66,10 +67,7 @@ export function registerCommands(program: Command): void {
     .description("Run preflight on a plan")
     .argument("<plan>", "path to the CE unified plan markdown file")
     .action((plan: string) => {
-      const code = runPreflight(plan);
-      if (code !== 0) {
-        process.exitCode = code;
-      }
+      runGuarded(() => runPreflight(plan));
     });
 
   program
@@ -77,14 +75,7 @@ export function registerCommands(program: Command): void {
     .description("Admit a plan: preflight + substrate probe + lease + first step")
     .argument("<plan>", "path to the CE unified plan markdown file")
     .action((plan: string) => {
-      runStart(plan)
-        .then((code) => {
-          process.exitCode = code;
-        })
-        .catch((error: unknown) => {
-          console.error(`miah start: ${error instanceof Error ? error.message : String(error)}`);
-          process.exitCode = ADMISSION_FAILURE_EXIT_CODE;
-        });
+      runGuarded(() => runStart(plan), "miah start");
     });
 
   program
@@ -93,14 +84,7 @@ export function registerCommands(program: Command): void {
     .argument("[run-id]", "run id to drive (defaults to the current run)")
     .option("--once", "run one step and exit")
     .action((runId: string | undefined, opts: { once?: boolean }) => {
-      runCommand(runId, { once: opts.once ?? false })
-        .then((code) => {
-          process.exitCode = code;
-        })
-        .catch((error: unknown) => {
-          console.error(`miah run: ${error instanceof Error ? error.message : String(error)}`);
-          process.exitCode = RUN_BLOCKED_EXIT_CODE;
-        });
+      runGuarded(() => runCommand(runId, { once: opts.once ?? false }), "miah run");
     });
 
   program

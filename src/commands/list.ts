@@ -7,7 +7,6 @@
  */
 import { loadConfig, resolveConfigBasePath } from "../config";
 import { readJournalFile } from "../journal";
-import { readManifest } from "../manifest";
 import { listRunIds, resolveRunLayout, RunStore } from "../run-store";
 import type { Config } from "../types";
 import { findLatestPlanSnapshot, planTitleOf, readOnlyState } from "./status";
@@ -46,7 +45,6 @@ export function runList(opts: ListOptions = {}): number {
   const config = opts.config ?? loadConfig();
   for (const runId of ids) {
     const layout = resolveRunLayout(basePath, runId);
-    const manifest = readManifest(layout);
     const store = new RunStore({ basePath, runId, config, holderId: "list-reader" });
     const state = readOnlyState(store);
     const snapshot = findLatestPlanSnapshot(layout);

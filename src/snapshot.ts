@@ -46,12 +46,18 @@ export function computeContentHash(content: string): string {
 
 /**
  * Canonicalize a plan, write it to `targetDir` (out-of-tree, created if
- * absent), and return the write path plus the content hash.
+ * absent), and return the write path plus the content hash. `filename`
+ * defaults to the v1 snapshot name; amendments write versioned names
+ * (`plan-snapshot.v<N>.md`, R68/KTD16).
  */
-export function writeSnapshot(planText: string, targetDir: string): SnapshotResult {
+export function writeSnapshot(
+  planText: string,
+  targetDir: string,
+  filename: string = DEFAULT_SNAPSHOT_FILENAME,
+): SnapshotResult {
   const canonicalContent = canonicalizePlan(planText);
   const hash = computeContentHash(canonicalContent);
-  const filePath = path.join(targetDir, DEFAULT_SNAPSHOT_FILENAME);
+  const filePath = path.join(targetDir, filename);
   fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(filePath, canonicalContent, "utf8");
   return { filePath, hash, canonicalContent };

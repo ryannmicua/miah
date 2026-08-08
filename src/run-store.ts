@@ -88,6 +88,24 @@ export function listRunIds(basePath: string): string[] {
     .sort();
 }
 
+/**
+ * Read the run's `units.json` machine view (R24). Null when absent, unreadable,
+ * or not a JSON object — the shared reader for the store, step, and dispatch.
+ */
+export function readUnitsJson(unitsJsonPath: string): Record<UnitId, PlanUnit> | null {
+  if (!fs.existsSync(unitsJsonPath)) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(unitsJsonPath, "utf8"));
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<UnitId, PlanUnit>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface RunStoreOptions {
   basePath: string;
   runId: string;
@@ -134,17 +152,7 @@ export class RunStore {
   }
 
   private readUnits(): Record<UnitId, PlanUnit> | undefined {
-    if (!fs.existsSync(this.layout.unitsJsonPath)) {
-      return undefined;
-    }
-    try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(this.layout.unitsJsonPath, "utf8"));
-      return typeof parsed === "object" && parsed !== null
-        ? (parsed as Record<UnitId, PlanUnit>)
-        : undefined;
-    } catch {
-      return undefined;
-    }
+    return readUnitsJson(this.layout.unitsJsonPath) ?? undefined;
   }
 
   /**

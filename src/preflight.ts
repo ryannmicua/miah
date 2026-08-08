@@ -17,6 +17,7 @@
  * Severity is block-only (R58): every finding is a refusal.
  */
 import { parsePlan } from "./parser";
+import { isGradingTier } from "./grading";
 import { ParsedPlan, UnitId } from "./types";
 
 /** Check classes (R56). */
@@ -155,7 +156,7 @@ export function structuralPreflight(plan: ParsedPlan): PreflightFinding[] {
 
     // Every criterion tier is from the D5 ladder (R28, R56(a)).
     for (const criterion of unit.acceptance ?? []) {
-      if (criterion.tier !== null && !["deterministic", "calibrated-judge", "human"].includes(criterion.tier)) {
+      if (criterion.tier !== null && !isGradingTier(criterion.tier)) {
         findings.push(
           finding(
             id,

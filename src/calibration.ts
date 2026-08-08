@@ -153,6 +153,26 @@ function isVerdictLabel(value: unknown): value is VerdictLabel {
   return value === "pass" || value === "fail";
 }
 
+/** Validate one corpus of pre-labeled cases; null when any entry is malformed. */
+function parseCases(entries: unknown[]): CalibrationCase[] | null {
+  const valid: CalibrationCase[] = [];
+  for (const entry of entries) {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return null;
+    }
+    const c = entry as Record<string, unknown>;
+    if (!isVerdictLabel(c.label) || !isVerdictLabel(c.verdict)) {
+      return null;
+    }
+    valid.push({
+      label: c.label,
+      verdict: c.verdict,
+      example: typeof c.example === "string" ? c.example : undefined,
+    });
+  }
+  return valid;
+}
+
 /**
  * Parse and validate a calibration profile file. A file that is absent,
  * unparseable, or schema-invalid yields null (fail-closed: no authority, R48).
@@ -192,41 +212,18 @@ export function readCalibrationProfile(filePath: string): CalibrationProfile | n
       if (!Array.isArray(cases)) {
         return null;
       }
-      const valid: CalibrationCase[] = [];
-      for (const entry of cases) {
-        if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-          return null;
-        }
-        const c = entry as Record<string, unknown>;
-        if (!isVerdictLabel(c.label) || !isVerdictLabel(c.verdict)) {
-          return null;
-        }
-        valid.push({
-          label: c.label,
-          verdict: c.verdict,
-          example: typeof c.example === "string" ? c.example : undefined,
-        });
+      const valid = parseCases(cases);
+      if (valid === null) {
+        return null;
       }
       tiers[tier] = valid;
     }
   }
   // Shorthand: a top-level `cases` array is the default-tier corpus.
   if (Array.isArray(p.cases)) {
-    const entries = p.cases as unknown[];
-    const valid: CalibrationCase[] = [];
-    for (const entry of entries) {
-      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
-        return null;
-      }
-      const c = entry as Record<string, unknown>;
-      if (!isVerdictLabel(c.label) || !isVerdictLabel(c.verdict)) {
-        return null;
-      }
-      valid.push({
-        label: c.label,
-        verdict: c.verdict,
-        example: typeof c.example === "string" ? c.example : undefined,
-      });
+    const valid = parseCases(p.cases as unknown[]);
+    if (valid === null) {
+      return null;
     }
     tiers[DEFAULT_CALIBRATION_TIER] = valid;
   }

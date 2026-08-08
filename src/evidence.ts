@@ -440,7 +440,11 @@ export async function harvestEvidence(ctx: HarvestContext): Promise<HarvestOutco
       artifactOrder.filter(([, ref]) => ref !== null).map(([key, ref]) => [key, ref as HarvestArtifactRef]),
     ),
     usage_delta: usageDelta,
-    verification: { commands: results.length, failed: results.filter((r) => r.exit_code !== 0).length, all_passed: results.every((r) => r.exit_code === 0) },
+    verification: {
+      commands: results.length,
+      failed: results.filter((r) => r.exit_code !== 0).length,
+      all_passed: verification.all_passed,
+    },
     postflight,
     deliverables: postflight.present,
     evidence_only_files: evidenceOnly,
@@ -458,7 +462,7 @@ export async function harvestEvidence(ctx: HarvestContext): Promise<HarvestOutco
   const chainWithRecord: Array<[string, HarvestArtifactRef | null]> = artifactOrder.slice();
   chainWithRecord[4] = ["record", recordRef];
   let chain = existingChain;
-  for (const [key, ref] of chainWithRecord) {
+  for (const [, ref] of chainWithRecord) {
     if (ref === null) {
       continue;
     }

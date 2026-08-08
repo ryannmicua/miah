@@ -29,9 +29,9 @@ import {
   isPastDeadline,
   isTerminalLifecycle,
   reconcileIntents,
+  refFromIntent,
   refusePastDeadline,
   type DispatchContext,
-  type DispatchRef,
   type GitCommitReader,
   type HandleResolver,
 } from "./dispatch";
@@ -47,15 +47,14 @@ import {
 import { commitIntegrationFiles, evaluateUnitAcceptance } from "./acceptance";
 import { gradeCriterion, type CriterionGrade } from "./grading";
 import { ensurePhase } from "./fsm";
-import { raiseEscalation, unresolvedEscalations, type EscalationSummary } from "./escalation";
+import { raiseEscalation, summaryFromEvent, unresolvedEscalations, type EscalationSummary } from "./escalation";
 import { defaultEnvelopePath, readEnvelope, type ResultEnvelope } from "./envelope";
 import type { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
-import type { RunStore } from "./run-store";
+import { readUnitsJson, type RunStore } from "./run-store";
 import type {
   Config,
   DerivedState,
   InFlightIntent,
-  JournalEvent,
   PlanUnit,
   SpecialistRole,
   UnitId,
@@ -169,17 +168,7 @@ function emptyOutcome(): StepOutcome {
 
 /** Read the parsed-once units.json machine view (R24). */
 export function readUnitsFromStore(store: RunStore): Record<UnitId, PlanUnit> | null {
-  if (!fs.existsSync(store.layout.unitsJsonPath)) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(store.layout.unitsJsonPath, "utf8"));
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<UnitId, PlanUnit>)
-      : null;
-  } catch {
-    return null;
-  }
+  return readUnitsJson(store.layout.unitsJsonPath);
 }
 
 /**
@@ -288,34 +277,12 @@ function dispatchCtx(ctx: StepContext): DispatchContext {
   };
 }
 
-function toRef(intent: InFlightIntent): DispatchRef {
-  return {
-    unit_id: intent.unit_id,
-    role: intent.role as SpecialistRole,
-    take: intent.take,
-    idempotency_key: intent.idempotency_key,
-    deadline: intent.deadline,
-  };
-}
-
-function toEscalationSummary(event: JournalEvent): EscalationSummary {
-  return {
-    escalation_id:
-      typeof event.escalation_id === "string" ? event.escalation_id : `esc-${event.seq}`,
-    unit_id: typeof event.unit_id === "string" ? event.unit_id : null,
-    trigger: typeof event.trigger === "string" ? event.trigger : "unknown",
-    reason: typeof event.reason === "string" ? event.reason : "",
-    criterion: typeof event.criterion === "string" ? event.criterion : null,
-    seq: event.seq,
-  };
-}
-
 function raiseEscalationSummary(
   ctx: StepContext,
   input: { unit_id?: string | null; trigger: string; reason: string; criterion?: string | null },
 ): EscalationSummary {
   const raised = raiseEscalation(ctx.store, input);
-  return toEscalationSummary(raised.event);
+  return summaryFromEvent(raised.event);
 }
 
 /** Recover a handle for an in-flight intent from the recorded agent id. */
@@ -525,7 +492,6 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
   // are evaluated before each poll cycle (R81).
   const liveIntents = store.replay().state.in_flight_intents;
   for (const intent of liveIntents) {
-    const unit = units[intent.unit_id] ?? null;
     let handle: PaseoHandle | null = runtime.handlesByUnit.get(intent.unit_id) ?? null;
     if (handle === null) {
       handle = await recoverHandle(ctx, intent);
@@ -541,7 +507,7 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
 
     const nowMs = ctx.now ? ctx.now() : Date.now();
     if (isPastDeadline(intent.deadline, nowMs)) {
-      await refusePastDeadline(dispatchCtx(ctx), toRef(intent), handle);
+      await refusePastDeadline(dispatchCtx(ctx), refFromIntent(intent), handle);
       outcome.polled.push({ unit_id: intent.unit_id, terminated: true });
       outcome.refused.push({
         unit_id: intent.unit_id,
@@ -583,7 +549,7 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
     // Candidate frozen for testing (KTD14): Implementing -> Reviewing.
     ensurePhase(store, "Reviewing");
     const envelopeRel = defaultEnvelopePath("builder", intent.unit_id, intent.take);
-    const harvest = await harvestEnvelope(dispatchCtx(ctx), toRef(intent), handle, envelopeRel);
+    const harvest = await harvestEnvelope(dispatchCtx(ctx), refFromIntent(intent), handle, envelopeRel);
     const proc = await harvestAndAccept(ctx, runtime, intent, handle, harvest.envelope);
     mergeProc(outcome, proc);
   }
@@ -731,7 +697,7 @@ async function harvestAndAccept(
     // applyAcceptance already appended escalation_raised (R82 trigger:
     // no-checker-profile / operator-judgment).
     if (acceptance.applied.escalationEvent !== null) {
-      proc.escalated.push(toEscalationSummary(acceptance.applied.escalationEvent));
+      proc.escalated.push(summaryFromEvent(acceptance.applied.escalationEvent));
     }
     return proc;
   }

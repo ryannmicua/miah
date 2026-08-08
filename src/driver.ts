@@ -255,7 +255,7 @@ function listEvidenceFiles(evidenceDir: string): string[] {
  * Contains per-unit evidence pointers + acceptance records, gap-close reasons,
  * usage totals, the plan hash, and run duration.
  */
-export function writeApprovalPackage(store: RunStore, config: Config): string | null {
+export function writeApprovalPackage(store: RunStore): string | null {
   const layout = store.layout;
   const state = store.replay().state;
   const units = readUnitsFromStore(store);
@@ -366,7 +366,7 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
       // AwaitingApproval -> Ready and re-dispatch the marked units.
       ensurePhase(store, "Ready");
     } else {
-      const pkgPath = writeApprovalPackage(store, config);
+      const pkgPath = writeApprovalPackage(store);
       return finishResult(store, holderId, "complete", 0, pkgPath);
     }
   }
@@ -403,14 +403,13 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
         // R67 resume: units await re-dispatch; continue the loop from Ready.
         ensurePhase(store, "Ready");
       } else {
-        const pkgPath = writeApprovalPackage(store, config);
+        const pkgPath = writeApprovalPackage(store);
         return finishResult(store, holderId, "complete", stepsRun, pkgPath);
       }
     }
 
-    const outcome = await runStep(ctx, runtime);
+    await runStep(ctx, runtime);
     stepsRun += 1;
-
     const state = store.replay().state;
     if (state.phase === "Attention") {
       return finishResult(store, holderId, "attention", stepsRun);
@@ -419,7 +418,7 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
       if (state.phase !== "AwaitingApproval") {
         ensurePhase(store, "AwaitingApproval");
       }
-      const pkgPath = writeApprovalPackage(store, config);
+      const pkgPath = writeApprovalPackage(store);
       return finishResult(store, holderId, "complete", stepsRun, pkgPath);
     }
     // R66: no executable work remains (nothing in-flight, nothing eligible, not

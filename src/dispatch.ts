@@ -25,11 +25,12 @@ import * as cp from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { setTimeout as sleep } from "timers/promises";
 import { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
 import { readEnvelope, defaultEnvelopePath, type ResultEnvelope } from "./envelope";
 import { readManifest } from "./manifest";
 import { composePacket, computePacketHash, extractUnitSection, renderPacketPrompt, type DispatchPacket } from "./packet";
-import { RunStore, type RunStoreLayout } from "./run-store";
+import { readUnitsJson, RunStore, type RunStoreLayout } from "./run-store";
 import {
   Config,
   D8I_ROLE_DEFAULTS,
@@ -289,22 +290,15 @@ function readPlanSnapshot(layout: RunStoreLayout): string {
   return fs.readFileSync(layout.planSnapshotPath, "utf8");
 }
 
-function readUnits(layout: RunStoreLayout): Record<UnitId, PlanUnit> | null {
-  if (!fs.existsSync(layout.unitsJsonPath)) {
-    return null;
-  }
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(layout.unitsJsonPath, "utf8"));
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<UnitId, PlanUnit>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** The dispatch ref view of a journaled in-flight intent (R37). */
+export function refFromIntent(intent: InFlightIntent): DispatchRef {
+  return {
+    unit_id: intent.unit_id,
+    role: intent.role as SpecialistRole,
+    take: intent.take,
+    idempotency_key: intent.idempotency_key,
+    deadline: intent.deadline,
+  };
 }
 
 /**
@@ -518,13 +512,7 @@ async function reconcileOne(
   unit: PlanUnit | null,
 ): Promise<ReconcileResult> {
   const now = ctx.now ? ctx.now() : Date.now();
-  const ref: DispatchRef = {
-    unit_id: intent.unit_id,
-    role: intent.role as SpecialistRole,
-    take: intent.take,
-    idempotency_key: intent.idempotency_key,
-    deadline: intent.deadline,
-  };
+  const ref = refFromIntent(intent);
   const envelopeRel = defaultEnvelopePath(ref.role, ref.unit_id, ref.take);
 
   let handle: PaseoHandle | null = null;
@@ -593,7 +581,7 @@ async function reconcileOne(
       lifecycle: status,
       deadline: intent.deadline,
     });
-    const { terminatedEvent, gapEvent } = await refusePastDeadline(ctx, ref, handle);
+    const { terminatedEvent } = await refusePastDeadline(ctx, ref, handle);
     return {
       intent,
       outcome: "handle-found",
@@ -653,7 +641,7 @@ async function reconcileOne(
  * `reconcile_record` before the decision.
  */
 export async function reconcileIntents(ctx: DispatchContext): Promise<ReconcileResult[]> {
-  const units = readUnits(ctx.store.layout);
+  const units = readUnitsJson(ctx.store.layout.unitsJsonPath);
   const intents = [...ctx.store.stateSnapshot().in_flight_intents];
   const results: ReconcileResult[] = [];
   for (const intent of intents) {

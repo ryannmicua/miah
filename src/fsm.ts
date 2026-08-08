@@ -29,6 +29,7 @@
  * `phase_transition` event (R35, R42) so the run's phase is always derivable
  * from the durable record.
  */
+import { INITIAL_PHASE } from "./replay";
 import type { DerivedState, JournalEvent } from "./types";
 import type { RunStore } from "./run-store";
 
@@ -62,7 +63,7 @@ const PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]> = {
 };
 
 /** The pre-transition sentinel phase produced by replay before any event. */
-export const INITIAL_PHASE_SENTINEL = "not-started";
+export const INITIAL_PHASE_SENTINEL = INITIAL_PHASE;
 
 /**
  * Whether any unit's derived status is `rework` or `not_started` (R67). After

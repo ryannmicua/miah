@@ -96,6 +96,19 @@ export function raiseEscalation(
   return { event, escalation_id };
 }
 
+/** Map an `escalation_raised` event to its summary shape. */
+export function summaryFromEvent(event: JournalEvent): EscalationSummary {
+  return {
+    escalation_id:
+      typeof event.escalation_id === "string" ? event.escalation_id : `esc-${event.seq}`,
+    unit_id: typeof event.unit_id === "string" ? event.unit_id : null,
+    trigger: typeof event.trigger === "string" ? event.trigger : "unknown",
+    reason: typeof event.reason === "string" ? event.reason : "",
+    criterion: typeof event.criterion === "string" ? event.criterion : null,
+    seq: event.seq,
+  };
+}
+
 /**
  * The escalations currently blocking the run, oldest first. Each
  * `escalation_resolved` closes the most recent open `escalation_raised` (the
@@ -106,15 +119,7 @@ export function unresolvedEscalations(store: RunStore): EscalationSummary[] {
   const open: EscalationSummary[] = [];
   for (const event of store.journal.readEvents()) {
     if (event.type === "escalation_raised") {
-      open.push({
-        escalation_id:
-          typeof event.escalation_id === "string" ? event.escalation_id : `esc-${event.seq}`,
-        unit_id: typeof event.unit_id === "string" ? event.unit_id : null,
-        trigger: typeof event.trigger === "string" ? event.trigger : "unknown",
-        reason: typeof event.reason === "string" ? event.reason : "",
-        criterion: typeof event.criterion === "string" ? event.criterion : null,
-        seq: event.seq,
-      });
+      open.push(summaryFromEvent(event));
     } else if (event.type === "escalation_resolved") {
       open.pop();
     }
