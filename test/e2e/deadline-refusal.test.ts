@@ -105,7 +105,8 @@ describe("e2e deadline refusal", () => {
       // Resume: reconciliation must terminate the specialist and refuse the work
       // before deciding any next transition (R5, R44).
       const resumeCode = await quietDriveOnce(opts, runId);
-      expect(resumeCode).not.toBe(0); // the run is paused (Attention), R66
+      // The run is paused (Attention, R66): exact RUN_BLOCKED_EXIT_CODE = 1.
+      expect(resumeCode).toBe(1);
 
       const events = journalEvents(basePath, runId);
       // The reconcile recorded the deadline-exceeded finding before the refusal.
