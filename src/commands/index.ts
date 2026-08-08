@@ -67,7 +67,7 @@ export function registerCommands(program: Command): void {
     .description("Run preflight on a plan")
     .argument("<plan>", "path to the CE unified plan markdown file")
     .action((plan: string) => {
-      runGuarded(() => runPreflight(plan));
+      runGuarded(() => runPreflight(plan), "miah preflight");
     });
 
   program
@@ -92,7 +92,7 @@ export function registerCommands(program: Command): void {
     .description("Render the run state read from the journal without launching a driver")
     .argument("[run-id]", "run id (defaults to the current run)")
     .action((runId: string | undefined) => {
-      runGuarded(() => runStatus(runId));
+      runGuarded(() => runStatus(runId), "miah status");
     });
 
   program
@@ -100,7 +100,7 @@ export function registerCommands(program: Command): void {
     .description("Request a stop: journal operator_decision stop and set the stop-requested flag")
     .argument("<run-id>", "run id")
     .action((runId: string) => {
-      runGuarded(() => runStop(runId));
+      runGuarded(() => runStop(runId), "miah stop");
     });
 
   program
@@ -117,6 +117,7 @@ export function registerCommands(program: Command): void {
     .action((runId: string, escalationId: string, opts: { decision: string; note?: string }) => {
       runGuarded(() =>
         runResolve(runId, escalationId, opts.decision.toLowerCase() as ResolveDecision, opts.note),
+        "miah resolve",
       );
     });
 
@@ -125,7 +126,7 @@ export function registerCommands(program: Command): void {
     .description("Approve a completed run (terminal: complete)")
     .argument("<run-id>", "run id")
     .action((runId: string) => {
-      runGuarded(() => runApprove(runId));
+      runGuarded(() => runApprove(runId), "miah approve");
     });
 
   program
@@ -142,7 +143,7 @@ export function registerCommands(program: Command): void {
               .map((id) => id.trim())
               .filter((id) => id.length > 0)
           : [];
-      runGuarded(() => runReject(runId, { rework, end: opts.end ?? false }));
+      runGuarded(() => runReject(runId, { rework, end: opts.end ?? false }), "miah reject");
     });
 
   program
@@ -151,13 +152,13 @@ export function registerCommands(program: Command): void {
     .argument("<run-id>", "run id")
     .argument("<new-plan>", "path to the replacement CE unified plan markdown file")
     .action((runId: string, newPlan: string) => {
-      runGuarded(() => runAmend(runId, newPlan));
+      runGuarded(() => runAmend(runId, newPlan), "miah amend");
     });
 
   program
     .command("list")
     .description("List all runs in ~/.miah/runs/")
     .action(() => {
-      runGuarded(() => runList());
+      runGuarded(() => runList(), "miah list");
     });
 }
