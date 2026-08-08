@@ -22,12 +22,14 @@
  * Transitions (plan U8 approach): Admitting→Ready (after lease),
  * Ready→Implementing (first dispatch), Implementing→Reviewing (candidate
  * frozen for testing), Reviewing→Implementing (next unit) or→AwaitingApproval
- * (all units done), AwaitingApproval→Complete (operator approve), any→Attention
+ * (all units done), AwaitingApproval→Complete (operator approve) or→Ready
+ * (R67 resume: the operator marked units for re-dispatch via `miah reject
+ * --rework` / `miah amend` while the run sat at the gate), any→Attention
  * (escalation), any→Stopping (operator stop). A transition is journaled as a
  * `phase_transition` event (R35, R42) so the run's phase is always derivable
  * from the durable record.
  */
-import type { JournalEvent } from "./types";
+import type { DerivedState, JournalEvent } from "./types";
 import type { RunStore } from "./run-store";
 
 /** The KTD14 run-phase enum. */
@@ -63,12 +65,30 @@ const PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]> = {
 export const INITIAL_PHASE_SENTINEL = "not-started";
 
 /**
+ * Whether any unit's derived status is `rework` or `not_started` (R67). After
+ * `miah reject --rework` / `miah amend` at the final gate, the marked units
+ * hold these statuses while the run phase is still AwaitingApproval — the
+ * signal that the run must resume (AwaitingApproval → Ready) instead of
+ * waiting for an approval that would leave the marked units re-dispatched
+ * only on paper.
+ */
+export function hasReworkMarkedUnits(state: DerivedState): boolean {
+  return Object.values(state.units).some(
+    (unit) => unit.status === "rework" || unit.status === "not_started",
+  );
+}
+
+/**
  * Whether a `from -> to` transition is permitted by the FSM (KTD14). Any
  * transition into `Attention` (escalation) or `Stopping` (operator stop) is
  * allowed from every phase per the plan; the sentinel "not-started" phase may
  * only open the machine (into Admitting/Ready) or pause it.
+ *
+ * `AwaitingApproval → Ready` (the R67 resume) is allowed only when `state`
+ * shows rework-marked units — without them the gate's only legal exit is
+ * `Complete` (operator approve).
  */
-export function isValidTransition(from: string, to: string): boolean {
+export function isValidTransition(from: string, to: string, state?: DerivedState): boolean {
   if (from === to) {
     return true;
   }
@@ -81,6 +101,9 @@ export function isValidTransition(from: string, to: string): boolean {
   const fromPhase = RUN_PHASES.find((phase) => phase === from);
   if (fromPhase === undefined) {
     return false;
+  }
+  if (fromPhase === "AwaitingApproval" && to === "Ready") {
+    return state !== undefined && hasReworkMarkedUnits(state);
   }
   return (PHASE_TRANSITIONS[fromPhase] as readonly string[]).includes(to);
 }
@@ -100,7 +123,7 @@ export function transitionPhase(
   if (from === to) {
     return null;
   }
-  if (!isValidTransition(from, to)) {
+  if (!isValidTransition(from, to, store.stateSnapshot())) {
     throw new Error(`invalid phase transition: ${from} -> ${to}`);
   }
   return store.append("phase_transition", { from, to });

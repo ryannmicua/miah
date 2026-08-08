@@ -365,6 +365,97 @@ describe("amend command", () => {
     expect(code).toBe(1);
     expect(stderr).toContain("no run found");
   });
+
+  it("amend at AwaitingApproval → next `miah run` resumes and re-dispatches the affected unit to completion (R67)", async () => {
+    const h = setupHarness(
+      {
+        U1: makeUnit("U1", 1, { creates: ["src/a.ts"] }),
+        U2: makeUnit("U2", 2, { dependsOn: ["U1"], creates: ["src/b.ts"] }),
+      },
+      {
+        seed: (w) => {
+          seedBuilderWorktree(w, "U1", 1, ["src/a.ts"]);
+          seedBuilderWorktree(w, "U2", 1, ["src/b.ts"]);
+        },
+      },
+    );
+    writeHarnessManifest(h);
+    h.t.store.lease.release(h.holderId);
+
+    // Drive both units to accepted (AwaitingApproval).
+    configureTerminalAdapter(h, { lifecycle: "idle", agentId: "agent-1" });
+    const driven = await runDriver({
+      store: new RunStore({
+        basePath: h.t.basePath,
+        runId: h.t.layout.runId,
+        config: h.config,
+        holderId: "drive-holder",
+        now: h.clock.fn,
+      }),
+      holderId: "drive-holder",
+      config: h.config,
+      adapter: h.adapter,
+      repoRoot: h.repoRoot,
+      canonicalWorktree: h.canonicalWorktree,
+      now: h.clock.fn,
+    });
+    expect(driven.status).toBe("complete");
+    expect(driven.phase).toBe("AwaitingApproval");
+
+    // Amend at the gate: U2's creates changes (src/b.ts -> src/b2.ts).
+    const newPlanPath = writePlanFile(V2_PLAN_2UNIT);
+    const amend = await capture(() =>
+      runAmend(h.t.layout.runId, newPlanPath, {
+        basePath: h.t.basePath,
+        config: h.config,
+        holderId: "amend-holder",
+        adapter: h.adapter,
+        workspaceRoot: h.repoRoot,
+      }),
+    );
+    expect(amend.code).toBe(0);
+
+    // Durable marking happened while the phase stayed at the gate (R67).
+    let state = h.t.store.replay().state;
+    expect(state.phase).toBe("AwaitingApproval");
+    expect(state.units.U2.status).toBe("rework");
+    expect(state.units.U1.status).toBe("accepted");
+
+    // Resume: the next run re-dispatches U2 (take 2) against the new plan and
+    // completes instead of exiting at the gate.
+    seedBuilderWorktree(h.worktree, "U2", 2, ["src/b2.ts"]);
+    configureTerminalAdapter(h, { lifecycle: "idle", agentId: "agent-u2" });
+    const resumed = await runDriver({
+      store: new RunStore({
+        basePath: h.t.basePath,
+        runId: h.t.layout.runId,
+        config: h.config,
+        holderId: "resume-holder",
+        now: h.clock.fn,
+      }),
+      holderId: "resume-holder",
+      config: h.config,
+      adapter: h.adapter,
+      repoRoot: h.repoRoot,
+      canonicalWorktree: h.canonicalWorktree,
+      now: h.clock.fn,
+    });
+    expect(resumed.status).toBe("complete");
+    expect(resumed.phase).toBe("AwaitingApproval");
+
+    state = h.t.store.replay().state;
+    expect(state.units.U2.status).toBe("accepted");
+    expect(state.units.U1.status).toBe("accepted");
+    const intents = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+    expect(intents).toHaveLength(2);
+    expect(
+      h.t.store.journal
+        .readEvents()
+        .some((e) => e.type === "phase_transition" && e.from === "AwaitingApproval" && e.to === "Ready"),
+    ).toBe(true);
+  });
 });
 
 // Run one step through the harness's step context (reconciles once per step).

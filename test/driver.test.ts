@@ -233,4 +233,117 @@ describe("driver", () => {
     expect(result.escalations.some((e) => e.trigger === "blocked-no-eligible-work")).toBe(true);
     expect(h.t.store.lease.holderId()).toBeNull();
   });
+
+  it("reject --rework at AwaitingApproval: next run resumes, re-dispatches the marked unit, and completes (R67)", async () => {
+    const h = setupHarness(
+      {
+        U1: makeUnit("U1", 1, { creates: ["src/a.ts"] }),
+        U2: makeUnit("U2", 2, { dependsOn: ["U1"], creates: ["src/b.ts"] }),
+      },
+      {
+        seed: (w) => {
+          seedBuilderWorktree(w, "U1", 1, ["src/a.ts"]);
+          seedBuilderWorktree(w, "U2", 1, ["src/b.ts"]);
+          seedBuilderWorktree(w, "U2", 2, ["src/b.ts"]);
+        },
+      },
+    );
+    configureTerminalAdapter(h);
+
+    // Drive both units to acceptance -> AwaitingApproval.
+    const first = await runDriver(driverOptions(h));
+    expect(first.status).toBe("complete");
+    expect(first.phase).toBe("AwaitingApproval");
+
+    // The operator rejects U2 for rework at the gate (the durable marking
+    // `miah reject --rework` writes: operator_decision + rework_started).
+    const acquired = h.t.store.lease.acquire(h.holderId);
+    expect(acquired.ok).toBe(true);
+    h.t.store.append("operator_decision", {
+      operator: "test-operator",
+      decision: "reject",
+      rework_units: ["U2"],
+      end: null,
+    });
+    h.t.store.append("rework_started", { unit_id: "U2", via: "operator-reject" });
+    h.t.store.lease.release(h.holderId);
+
+    let state = h.t.store.replay().state;
+    expect(state.phase).toBe("AwaitingApproval");
+    expect(state.units.U2.status).toBe("rework");
+    expect(state.units.U1.status).toBe("accepted");
+
+    // The next `miah run` resumes instead of exiting at the gate.
+    const resumed = await runDriver(driverOptions(h));
+    expect(resumed.status).toBe("complete");
+    expect(resumed.phase).toBe("AwaitingApproval");
+
+    state = h.t.store.replay().state;
+    expect(state.units.U2.status).toBe("accepted");
+    expect(state.units.U1.status).toBe("accepted");
+    // U2 was re-dispatched (take 2) and completed, not just marked.
+    const intents = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+    expect(intents).toHaveLength(2);
+    const phaseEvents = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "phase_transition" && e.to === "Ready");
+    expect(phaseEvents.some((e) => e.from === "AwaitingApproval")).toBe(true);
+    expect(h.t.store.lease.holderId()).toBeNull();
+  });
+
+  it("amend at AwaitingApproval: next run resumes, re-dispatches the affected unit, and completes (R67)", async () => {
+    const h = setupHarness(
+      {
+        U1: makeUnit("U1", 1, { creates: ["src/a.ts"] }),
+        U2: makeUnit("U2", 2, { dependsOn: ["U1"], creates: ["src/b.ts"] }),
+      },
+      {
+        seed: (w) => {
+          seedBuilderWorktree(w, "U1", 1, ["src/a.ts"]);
+          seedBuilderWorktree(w, "U2", 1, ["src/b.ts"]);
+          seedBuilderWorktree(w, "U2", 2, ["src/b.ts"]);
+        },
+      },
+    );
+    configureTerminalAdapter(h);
+
+    const first = await runDriver(driverOptions(h));
+    expect(first.status).toBe("complete");
+    expect(first.phase).toBe("AwaitingApproval");
+
+    // The operator amends at the gate: affected accepted units are durably
+    // marked for re-dispatch (rework_started, via amendment) while the phase
+    // stays AwaitingApproval (runAmend's durable marking).
+    const acquired = h.t.store.lease.acquire(h.holderId);
+    expect(acquired.ok).toBe(true);
+    h.t.store.append("operator_decision", { operator: "test-operator", decision: "amend" });
+    h.t.store.append("amendment_applied", {
+      new_hash: "b".repeat(64),
+      previous_hash: "a".repeat(64),
+      version: 2,
+      changed_units: ["U2"],
+      affected_units: ["U2"],
+    });
+    h.t.store.append("rework_started", { unit_id: "U2", via: "amendment" });
+    h.t.store.lease.release(h.holderId);
+
+    let state = h.t.store.replay().state;
+    expect(state.phase).toBe("AwaitingApproval");
+    expect(state.units.U2.status).toBe("rework");
+
+    const resumed = await runDriver(driverOptions(h));
+    expect(resumed.status).toBe("complete");
+    expect(resumed.phase).toBe("AwaitingApproval");
+
+    state = h.t.store.replay().state;
+    expect(state.units.U2.status).toBe("accepted");
+    expect(state.units.U1.status).toBe("accepted");
+    const intents = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+    expect(intents).toHaveLength(2);
+    expect(h.t.store.lease.holderId()).toBeNull();
+  });
 });

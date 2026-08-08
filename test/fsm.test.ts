@@ -9,11 +9,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   ensurePhase,
+  hasReworkMarkedUnits,
   INITIAL_PHASE_SENTINEL,
   isValidTransition,
   RUN_PHASES,
   transitionPhase,
 } from "../src/fsm";
+import { emptyDerivedState } from "../src/replay";
 import { cleanupTempDirs, createTestStore, type TestStore } from "./helpers";
 
 function setupStore(): TestStore {
@@ -23,6 +25,33 @@ function setupStore(): TestStore {
     throw new Error(`lease acquire failed: ${acquired.reason}`);
   }
   return t;
+}
+
+function acceptedUnit(): { status: "accepted"; takes: number; rework_cycles: number; last_acceptance: "accept" } {
+  return { status: "accepted", takes: 1, rework_cycles: 0, last_acceptance: "accept" };
+}
+
+function reworkUnit(): { status: "rework"; takes: number; rework_cycles: number; last_acceptance: "not_accepted" } {
+  return { status: "rework", takes: 1, rework_cycles: 1, last_acceptance: "not_accepted" };
+}
+
+function notStartedUnit(): { status: "not_started"; takes: number; rework_cycles: number; last_acceptance: null } {
+  return { status: "not_started", takes: 0, rework_cycles: 0, last_acceptance: null };
+}
+
+function stateWithUnits(
+  units: Record<string, ReturnType<typeof acceptedUnit>>,
+): ReturnType<typeof emptyDerivedState> {
+  return { ...emptyDerivedState(), units };
+}
+
+/** Walk a store through the happy path into AwaitingApproval. */
+function driveToAwaitingApproval(t: TestStore): void {
+  transitionPhase(t.store, "Admitting", "Ready");
+  transitionPhase(t.store, "Ready", "Implementing");
+  transitionPhase(t.store, "Implementing", "Reviewing");
+  transitionPhase(t.store, "Reviewing", "AwaitingApproval");
+  t.store.append("acceptance_decision", { unit_id: "U1", decision: "accept" });
 }
 
 afterEach(cleanupTempDirs);
@@ -128,5 +157,68 @@ describe("fsm", () => {
     transitionPhase(t.store, "Ready", "Attention");
     const { state } = t.store.replay();
     expect(state.phase).toBe("Attention");
+  });
+
+  it("AwaitingApproval → Ready is NOT allowed without rework-marked units (R67)", () => {
+    expect(isValidTransition("AwaitingApproval", "Ready")).toBe(false);
+    const allAccepted = stateWithUnits({ U1: acceptedUnit() });
+    expect(isValidTransition("AwaitingApproval", "Ready", allAccepted)).toBe(false);
+    const emptyState = emptyDerivedState();
+    expect(isValidTransition("AwaitingApproval", "Ready", emptyState)).toBe(false);
+  });
+
+  it("AwaitingApproval → Ready IS allowed when rework-marked units exist (R67)", () => {
+    const withRework = stateWithUnits({ U1: acceptedUnit(), U2: reworkUnit() });
+    expect(isValidTransition("AwaitingApproval", "Ready", withRework)).toBe(true);
+
+    const withNotStarted = stateWithUnits({ U1: acceptedUnit(), U2: notStartedUnit() });
+    expect(isValidTransition("AwaitingApproval", "Ready", withNotStarted)).toBe(true);
+  });
+
+  it("AwaitingApproval → Complete remains the normal gate exit regardless of units (R67)", () => {
+    const withRework = stateWithUnits({ U1: acceptedUnit(), U2: reworkUnit() });
+    expect(isValidTransition("AwaitingApproval", "Complete", withRework)).toBe(true);
+    expect(isValidTransition("AwaitingApproval", "Complete")).toBe(true);
+  });
+
+  it("hasReworkMarkedUnits is true for rework or not_started, false otherwise", () => {
+    expect(hasReworkMarkedUnits(stateWithUnits({ U1: acceptedUnit() }))).toBe(false);
+    expect(hasReworkMarkedUnits(emptyDerivedState())).toBe(false);
+    expect(hasReworkMarkedUnits(stateWithUnits({ U1: reworkUnit() }))).toBe(true);
+    expect(hasReworkMarkedUnits(stateWithUnits({ U1: notStartedUnit() }))).toBe(true);
+  });
+
+  it("transitionPhase journals AwaitingApproval → Ready when rework-marked units exist (R67)", () => {
+    const t = setupStore();
+    driveToAwaitingApproval(t);
+    t.store.append("rework_started", { unit_id: "U1", via: "operator-reject" });
+    expect(t.store.stateSnapshot().units.U1.status).toBe("rework");
+
+    const event = transitionPhase(t.store, "AwaitingApproval", "Ready");
+    expect(event).toMatchObject({ type: "phase_transition", from: "AwaitingApproval", to: "Ready" });
+    expect(t.store.replay().state.phase).toBe("Ready");
+  });
+
+  it("transitionPhase throws on AwaitingApproval → Ready without rework-marked units (no partial journal write)", () => {
+    const t = setupStore();
+    driveToAwaitingApproval(t);
+    expect(t.store.stateSnapshot().units.U1.status).toBe("accepted");
+
+    const before = t.store.journal.currentSeq();
+    expect(() => transitionPhase(t.store, "AwaitingApproval", "Ready")).toThrow(
+      /invalid phase transition/,
+    );
+    expect(t.store.journal.currentSeq()).toBe(before);
+    expect(t.store.replay().state.phase).toBe("AwaitingApproval");
+  });
+
+  it("ensurePhase resumes a gate-sitting run with rework-marked units via AwaitingApproval → Ready", () => {
+    const t = setupStore();
+    driveToAwaitingApproval(t);
+    t.store.append("rework_started", { unit_id: "U1", via: "amendment" });
+
+    const event = ensurePhase(t.store, "Ready");
+    expect(event).toMatchObject({ type: "phase_transition", from: "AwaitingApproval", to: "Ready" });
+    expect(t.store.replay().state.phase).toBe("Ready");
   });
 });

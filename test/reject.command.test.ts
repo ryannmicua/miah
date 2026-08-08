@@ -236,4 +236,56 @@ describe("reject command", () => {
     expect(code).toBe(1);
     expect(stderr).toContain("mutually exclusive");
   });
+
+  it("reject --rework at AwaitingApproval → next `miah run` re-dispatches the marked unit and completes (R67)", async () => {
+    const run = await admit(TWO_UNIT_PLAN);
+    await driveToApproval(run, [
+      { unit: "U1", take: 1, files: ["src/a.ts"] },
+      { unit: "U2", take: 1, files: ["src/b.ts"] },
+    ]);
+
+    // Operator rejects U2 for rework at the final gate.
+    const { code, stdout } = await capture(() =>
+      runReject(run.runId, { rework: ["U2"] }, { basePath: run.basePath, config: run.config }),
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain("U2 marked for re-dispatch");
+
+    // The run still sits at the gate with U2 durably marked for rework.
+    const before = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    let state = before.replay().state;
+    expect(state.phase).toBe("AwaitingApproval");
+    expect(state.units.U2.status).toBe("rework");
+
+    // The next `miah run` resumes: U2 re-dispatched (take 2) and completes.
+    await driveToApproval(run, [
+      { unit: "U1", take: 1, files: ["src/a.ts"] },
+      { unit: "U2", take: 1, files: ["src/b.ts"] },
+      { unit: "U2", take: 2, files: ["src/b.ts"] },
+    ]);
+
+    const after = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    state = after.replay().state;
+    expect(state.units.U1.status).toBe("accepted");
+    expect(state.units.U2.status).toBe("accepted");
+    expect(state.phase).toBe("AwaitingApproval");
+
+    const { events } = readJournalFile(after.layout.journalPath);
+    const u2Intents = events.filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+    expect(u2Intents).toHaveLength(2);
+    const resumed = events.some(
+      (e) => e.type === "phase_transition" && e.from === "AwaitingApproval" && e.to === "Ready",
+    );
+    expect(resumed).toBe(true);
+  });
 });

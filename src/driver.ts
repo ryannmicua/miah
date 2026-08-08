@@ -34,7 +34,7 @@ import {
   type StepContext,
   type StepRuntime,
 } from "./step";
-import { ensurePhase } from "./fsm";
+import { ensurePhase, hasReworkMarkedUnits } from "./fsm";
 import {
   raiseEscalation,
   unresolvedEscalations,
@@ -360,8 +360,15 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
     return finishResult(store, holderId, "attention", 0);
   }
   if (initialPhase === "AwaitingApproval") {
-    const pkgPath = writeApprovalPackage(store, config);
-    return finishResult(store, holderId, "complete", 0, pkgPath);
+    if (hasReworkMarkedUnits(store.replay().state)) {
+      // R67: the operator marked units for re-dispatch (`miah reject --rework`
+      // / `miah amend`) while the run sat at the gate. Resume:
+      // AwaitingApproval -> Ready and re-dispatch the marked units.
+      ensurePhase(store, "Ready");
+    } else {
+      const pkgPath = writeApprovalPackage(store, config);
+      return finishResult(store, holderId, "complete", 0, pkgPath);
+    }
   }
   if (initialPhase === "Complete") {
     return finishResult(store, holderId, "complete", 0);
@@ -392,8 +399,13 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
       return finishResult(store, holderId, "attention", stepsRun);
     }
     if (phaseNow === "AwaitingApproval") {
-      const pkgPath = writeApprovalPackage(store, config);
-      return finishResult(store, holderId, "complete", stepsRun, pkgPath);
+      if (hasReworkMarkedUnits(store.replay().state)) {
+        // R67 resume: units await re-dispatch; continue the loop from Ready.
+        ensurePhase(store, "Ready");
+      } else {
+        const pkgPath = writeApprovalPackage(store, config);
+        return finishResult(store, holderId, "complete", stepsRun, pkgPath);
+      }
     }
 
     const outcome = await runStep(ctx, runtime);
