@@ -8,6 +8,7 @@
  */
 import * as fs from "fs";
 import { afterEach, describe, expect, it } from "vitest";
+import { createStepRuntime, runStep } from "../src/step";
 import { fastConfig, cleanupTempDirs } from "./helpers";
 import {
   configureTerminalAdapter,
@@ -16,6 +17,7 @@ import {
   makeUnit,
   seedBuilderWorktree,
   setupHarness,
+  stepContext,
   type StepHarness,
 } from "./helpers/step-harness";
 
@@ -175,6 +177,38 @@ describe("step", () => {
     expect(raised).toMatchObject({ trigger: "no-progress", unit_id: "U1" });
     // The unit was not terminated: the run pauses with it still in-flight.
     expect(state.in_flight_intents.some((i) => i.unit_id === "U1")).toBe(true);
+  });
+
+  it("no-progress does not carry across a session boundary: a fresh runtime resets the poll streak (R76, L4)", async () => {
+    const h = setupHarness(
+      { U1: makeUnit("U1", 1, { creates: ["src/hello.ts"] }) },
+      { seed: (w) => seedBuilderWorktree(w, "U1", 1, ["src/hello.ts"]) },
+    );
+    // The specialist stays "running" with an unchanged lifecycle/usage.
+    configureTerminalAdapter(h, { lifecycle: "running" });
+    const ctx = stepContext(h);
+
+    // Session 1: dispatch + first unchanged poll in one step, then a second
+    // unchanged poll — streak = 2, just below the 3-poll escalation threshold
+    // (fastConfig's no_progress_polls).
+    const runtime1 = createStepRuntime();
+    const first = await runStep(ctx, runtime1);
+    expect(first.dispatched).toEqual([{ unit_id: "U1", take: 1 }]);
+    await runStep(ctx, runtime1); // unchanged poll 2
+    expect(runtime1.noProgressByUnit.get("U1")).toBe(2);
+    expect(h.t.store.replay().state.phase).not.toBe("Attention");
+
+    // Session 2 (a fresh runtime, as after driver downtime): one more unchanged
+    // poll must NOT escalate — the streak restarts at 1 in the new session.
+    const runtime2 = createStepRuntime();
+    const resumed = await runStep(ctx, runtime2);
+    expect(resumed.escalated).toHaveLength(0);
+    expect(runtime2.noProgressByUnit.get("U1")).toBe(1);
+    expect(h.t.store.replay().state.phase).not.toBe("Attention");
+    // The unit was never terminated; it stays in-flight for the new session.
+    expect(
+      h.t.store.replay().state.in_flight_intents.some((i) => i.unit_id === "U1"),
+    ).toBe(true);
   });
 
   it("max takes exceeded: the 3rd failed take → escalation_raised: repeatedly-fails (R77, U8.8)", async () => {
