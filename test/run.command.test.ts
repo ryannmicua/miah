@@ -8,6 +8,9 @@ import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { admitPlan } from "../src/admission";
 import { runCommand, resolveRunId } from "../src/commands/run";
+import { raiseEscalation } from "../src/escalation";
+import { ensurePhase } from "../src/fsm";
+import { RunStore } from "../src/run-store";
 import { fastConfig, cleanupTempDirs, makeTempDir } from "./helpers";
 import { makeFakeProbe } from "./fixtures/fake-substrate-probe";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
@@ -168,7 +171,6 @@ describe("run command", () => {
     const run = await admit();
     // Release the admission-time lease, then a *different* holder acquires it
     // with a fresh heartbeat (simulating another live driver).
-    const { RunStore } = await import("../src/run-store");
     const admitStore = new RunStore({
       basePath: run.basePath,
       runId: run.runId,
@@ -196,5 +198,37 @@ describe("run command", () => {
     });
     expect(code).toBe(1);
     expect(logs.stdout.join("\n")).toContain("lease held by another driver");
+  });
+
+  it("returns RUN_BLOCKED_EXIT_CODE (1) when the run is paused in Attention (blocked)", async () => {
+    const run = await admit();
+    // A prior driver session escalated the run and paused it in Attention.
+    const store = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    raiseEscalation(store, {
+      unit_id: "U1",
+      trigger: "repeatedly-fails",
+      reason: "max takes exceeded for U1 (R77)",
+    });
+    ensurePhase(store, "Attention");
+    store.lease.release(run.holderId);
+
+    const logs = captureLogs();
+    const code = await runCommand(run.runId, {
+      adapter: adapterFor(run),
+      basePath: run.basePath,
+      holderId: run.holderId,
+      config: run.config,
+      workspaceRoot: run.worktree,
+      canonicalWorktree: run.canonicalWorktree,
+    });
+    // The E2E drive-run child depends on this exact exit code (Attention).
+    expect(code).toBe(1);
+    expect(logs.stdout.join("\n")).toContain("run paused in Attention");
+    expect(logs.stdout.join("\n")).toContain("max takes exceeded");
   });
 });
