@@ -1,0 +1,38 @@
+{
+  "name": "miah",
+  "version": "0.1.0",
+  "description": "Resumable plan supervisor CLI - coordinates specialist agents to execute one immutable approved plan",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "bin": {
+    "miah": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node test/run.mjs"
+  },
+  "keywords": [
+    "cli",
+    "plan",
+    "supervisor",
+    "agents",
+    "orchestration"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.1"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "yaml": "^2.9.0"
+  }
+}
