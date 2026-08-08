@@ -340,6 +340,44 @@ describe("resolve command", () => {
     expect(implicit?.close_reason).toBe("operator-approval");
   });
 
+  it("deny resolves the escalation without accepting the unit (R66, U9.8)", async () => {
+    const run = await admit();
+    const escalationId = escalateAndPause(run);
+
+    const { code, stdout } = await captureRunResolve(
+      run.runId,
+      escalationId,
+      "deny",
+      "operator denies this attempt",
+      run.basePath,
+      run.config,
+    );
+    expect(code).toBe(0);
+    expect(stdout).toContain("resolved with deny");
+
+    const store = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    const { events } = readJournalFile(store.layout.journalPath);
+    expect(
+      events.some((e) => e.type === "operator_decision" && e.resolve_decision === "deny"),
+    ).toBe(true);
+    const resolved = events.find((e) => e.type === "escalation_resolved");
+    expect(resolved).toMatchObject({ escalation_id: escalationId, decision: "deny" });
+    expect(resolved?.close_reason).toContain("operator denies this attempt");
+
+    // The unit was NOT accepted and no rework was started for it.
+    expect(events.some((e) => e.type === "acceptance_decision" && e.decision === "accept")).toBe(
+      false,
+    );
+    expect(events.some((e) => e.type === "rework_started")).toBe(false);
+    expect(store.replay().state.units.U1.status).not.toBe("accepted");
+    expect(unresolvedEscalations(store)).toHaveLength(0);
+  });
+
   it("returns non-zero when the escalation is not open", async () => {
     const run = await admit();
     // Release the admission lease so the resolve command can acquire it.
