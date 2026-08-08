@@ -42,6 +42,7 @@ import {
   journalEvents,
   layoutOf,
   openEscalations,
+  paseoCliAvailable,
   quietDriveOnce,
   resolveApprove,
   startRun,
@@ -111,7 +112,7 @@ async function driveToStopped(opts: E2EOptions, runId: string): Promise<void> {
 }
 
 describe("e2e full-run", () => {
-  it(
+  it.runIf(paseoCliAvailable())(
     "start (fake probe) -> run to completion -> approve: all units accepted, evidence harvested, integration completed, approval package written, calibrated-judge escalation resolved",
     async () => {
       const repo = makeFixtureRepo();
@@ -266,7 +267,7 @@ describe("e2e full-run", () => {
 });
 
 describe("e2e stop and resume", () => {
-  it(
+  it.runIf(paseoCliAvailable())(
     "miah stop terminates the in-flight specialist and honors the stop on the next run; a later miah run resumes to completion (U10.8, R65)",
     async () => {
       const repo = makeFixtureRepo();
@@ -334,7 +335,7 @@ describe("e2e stop and resume", () => {
 });
 
 describe("e2e amend", () => {
-  it(
+  it.runIf(paseoCliAvailable())(
     "miah amend changes U2's creates: mid-run -> new snapshot, U2 re-dispatched, run continues to completion (U10.9, R68)",
     async () => {
       const repo = makeFixtureRepo();

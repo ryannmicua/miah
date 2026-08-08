@@ -33,6 +33,7 @@ import {
   journalEvents,
   killChild,
   layoutOf,
+  paseoCliAvailable,
   quietDriveOnce,
   serializeState,
   spawnDriveChild,
@@ -87,7 +88,7 @@ afterEach(() => {
 });
 
 describe("e2e kill drill", () => {
-  it(
+  it.runIf(paseoCliAvailable())(
     "kill the driver mid-dispatch at U2 -> resume -> byte-identical state -> intent reconciled -> continue to completion",
     async () => {
       const repo = makeFixtureRepo();

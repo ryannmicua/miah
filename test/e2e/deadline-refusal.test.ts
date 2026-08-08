@@ -21,6 +21,7 @@ import {
   derivedState,
   e2eConfig,
   journalEvents,
+  paseoCliAvailable,
   quietDriveOnce,
   startRun,
   TEST_PLAN,
@@ -69,7 +70,7 @@ interface Clock {
 }
 
 describe("e2e deadline refusal", () => {
-  it(
+  it.runIf(paseoCliAvailable())(
     "deadline expired while Miah was dead -> resume -> specialist terminated -> work refused -> gap_recorded: deadline-exceeded (R5)",
     async () => {
       const repo = makeFixtureRepo();
