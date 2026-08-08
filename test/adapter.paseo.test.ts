@@ -364,5 +364,18 @@ describe("adapter stop / cancel", () => {
     const adapter = new PaseoCliAdapter(failsToSpawn, 50);
     await expect(adapter.stop(handle)).rejects.toBeInstanceOf(PaseoCliUnavailableError);
   });
+
+  it("the stop-exec timeout warning routes through the injected onWarning callback", async () => {
+    const handle: PaseoHandle = { agentId: "agent-1", cwd: null, workspaceId: null };
+    const neverAcknowledges: CliExecutor = () => new Promise(() => {});
+    const warnings: string[] = [];
+    const adapter = new PaseoCliAdapter(neverAcknowledges, 50, (message) => {
+      warnings.push(message);
+    });
+
+    await expect(adapter.stop(handle)).resolves.toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("did not acknowledge within 50ms");
+  });
 });
 

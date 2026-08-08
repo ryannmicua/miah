@@ -21,7 +21,13 @@ import type { RunStore } from "./run-store";
 
 /** The R82 trigger set plus the R66 run-wide blocking trigger (R35 event). */
 export const ESCALATION_TRIGGERS = [
-  /** R77/R78: max takes or max rework cycles exhausted (KTD13). */
+  /**
+   * R77/R78: max takes or max rework cycles exhausted (KTD13). The umbrella
+   * trigger is what the step function actually raises (src/step.ts
+   * `escalateRepeatedlyFails`); the two specific R82 entries below are kept so
+   * the R82 conformance test (test/escalation.test.ts) can assert the full
+   * "must include" set — the umbrella intentionally covers both semantics.
+   */
   "repeatedly-fails",
   /** R76: N consecutive adapter polls with no lifecycle/activity change. */
   "no-progress",

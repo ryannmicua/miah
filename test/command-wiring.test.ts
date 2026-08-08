@@ -43,7 +43,7 @@ interface CliResult {
 }
 
 /** Parse CLI args through the real program, capturing output (cli.test.ts style). */
-function runCli(args: string[]): CliResult {
+async function runCli(args: string[]): Promise<CliResult> {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
   const consoleLogs: string[] = [];
@@ -73,7 +73,10 @@ function runCli(args: string[]): CliResult {
     logSpy.mockRestore();
     errorSpy.mockRestore();
   }
-  // Command bodies set process.exitCode (the real CLI's exit mechanism).
+  // Command bodies set process.exitCode (the real CLI's exit mechanism). Async
+  // commands set it inside a microtask (runGuarded's .then), so hop the
+  // microtask queue before reading it — a sync read would see a stale 0.
+  await Promise.resolve();
   if (process.exitCode !== undefined && process.exitCode !== 0) {
     exitCode = process.exitCode;
     process.exitCode = 0;
@@ -107,13 +110,13 @@ describe("command wiring", () => {
     process.env.MIAH_CONFIG_HOME = basePath;
     try {
       // status renders the run through the real CLI.
-      const status = runCli(["status", runId]);
+      const status = await runCli(["status", runId]);
       expect(status.exitCode).toBe(0);
       expect(status.stdout).toContain(`run id: ${runId}`);
       expect(status.stdout).toContain("Wiring Test Plan");
 
       // list shows the run through the real CLI.
-      const list = runCli(["list"]);
+      const list = await runCli(["list"]);
       expect(list.exitCode).toBe(0);
       expect(list.stdout).toContain(runId);
     } finally {
@@ -128,7 +131,7 @@ describe("command wiring", () => {
     const store = new RunStore({ basePath, runId, config, holderId });
     store.lease.release(holderId);
     process.env.MIAH_CONFIG_HOME = basePath;
-    const stop = runCli(["stop", runId]);
+    const stop = await runCli(["stop", runId]);
     expect(stop.exitCode).toBe(0);
     expect(stop.stdout).toContain("stop requested");
     expect(readStopRequested(store.layout)).toBe(true);
@@ -137,7 +140,7 @@ describe("command wiring", () => {
 
   it("a missing run surfaces a non-zero exit through the CLI", async () => {
     process.env.MIAH_CONFIG_HOME = makeTempDir("miah-wiring-empty-");
-    const result = runCli(["status", "run-missing"]);
+    const result = await runCli(["status", "run-missing"]);
     delete process.env.MIAH_CONFIG_HOME;
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("no manifest");

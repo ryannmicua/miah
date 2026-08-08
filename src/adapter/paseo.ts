@@ -480,6 +480,7 @@ export class PaseoCliAdapter implements PaseoAdapter {
   constructor(
     private readonly exec: CliExecutor = createDefaultExecutor(),
     private readonly stopTimeoutMs: number = DEFAULT_STOP_EXEC_TIMEOUT_MS,
+    private readonly onWarning: (message: string) => void = console.error,
   ) {}
 
   /**
@@ -612,7 +613,7 @@ export class PaseoCliAdapter implements PaseoAdapter {
           return;
         }
         settled = true;
-        console.error(
+        this.onWarning(
           `miah adapter: paseo agent stop did not acknowledge within ${this.stopTimeoutMs}ms; terminating best-effort`,
         );
         resolve(null);

@@ -11,9 +11,6 @@ import { listRunIds, resolveRunLayout, RunStore } from "../run-store";
 import type { Config } from "../types";
 import { findLatestPlanSnapshot, planTitleOf, readOnlyState } from "./status";
 
-/** Exit code on unexpected list errors. */
-export const LIST_ERROR_EXIT_CODE = 1;
-
 export interface ListOptions {
   config?: Config;
   basePath?: string;
