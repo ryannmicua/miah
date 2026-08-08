@@ -6,7 +6,7 @@
  * text). The one sanctioned live dispatch (the immutability probe) lives in
  * the substrate-probe tests.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   PaseoCliAdapter,
   PaseoCliError,
@@ -318,6 +318,37 @@ describe("adapter stop / cancel", () => {
     }));
     const adapter = new PaseoCliAdapter(exec);
     await expect(adapter.stop(handle)).rejects.toThrow(/AGENT_NOT_FOUND/);
+  });
+
+  it("stop returns within the timeout and does not throw when the CLI never acknowledges (best-effort)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const handle: PaseoHandle = { agentId: "agent-1", cwd: null, workspaceId: null };
+      // A stop exec that never settles — the slow-daemon acknowledgment case
+      // that hung the driver (adapter.stop blocked forever, so stopAndRelease /
+      // refusePastDeadline never reached the Stopping transition).
+      const neverAcknowledges: CliExecutor = () => new Promise(() => {});
+      const adapter = new PaseoCliAdapter(neverAcknowledges, 50);
+
+      const started = Date.now();
+      await expect(adapter.stop(handle)).resolves.toBeUndefined();
+      const elapsed = Date.now() - started;
+      // Bounded by the injected 50ms stop timeout — never the vitest default
+      // per-test timeout (which would indicate the unbounded hang returned).
+      expect(elapsed).toBeGreaterThanOrEqual(40);
+      expect(elapsed).toBeLessThan(5_000);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("stop still throws when the CLI exec fails (a genuine error is not swallowed as a timeout)", async () => {
+    const handle: PaseoHandle = { agentId: "agent-1", cwd: null, workspaceId: null };
+    const failsToSpawn: CliExecutor = async () => {
+      throw new PaseoCliUnavailableError("paseo CLI failed to spawn: spawn ENOENT");
+    };
+    const adapter = new PaseoCliAdapter(failsToSpawn, 50);
+    await expect(adapter.stop(handle)).rejects.toBeInstanceOf(PaseoCliUnavailableError);
   });
 });
 

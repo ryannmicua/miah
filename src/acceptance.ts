@@ -21,6 +21,7 @@
  * `gap_recorded: integration-smuggle` event is journaled and the unit cannot be
  * accepted (R54, AE17).
  */
+import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { JournalEvent, OpenGap, PlanUnit } from "./types";
@@ -193,6 +194,49 @@ export interface IntegrationInput {
   /** The unit's verification-contract commands (R45, R54). */
   verificationCommands: string[];
   runCommand?: CommandRunner;
+  /**
+   * R89 hook: commit the integrated `creates:` paths in the canonical
+   * worktree after verification passes. Absent (unit-test harness) or a
+   * non-git canonical checkout: nothing is committed.
+   */
+  commitIntegration?: (canonicalWorktree: string, unit: PlanUnit) => void;
+}
+
+/**
+ * R89: commit the accepted unit's `creates:` paths in the canonical worktree
+ * so a later dependent unit's worktree (branched off the canonical HEAD) sees
+ * the dependency's integrated deliverable. No-op for a non-git canonical
+ * checkout (the pure unit-test harness drives integration against a plain
+ * temp dir) and idempotent on resume (`git commit` with nothing staged).
+ */
+export function commitIntegrationFiles(canonicalWorktree: string, unit: PlanUnit): void {
+  const creates = unit.creates ?? [];
+  if (creates.length === 0) {
+    return;
+  }
+  if (!fs.existsSync(path.join(canonicalWorktree, ".git"))) {
+    return;
+  }
+  cp.execFileSync("git", ["add", "--", ...creates], { cwd: canonicalWorktree, stdio: "ignore" });
+  try {
+    cp.execFileSync(
+      "git",
+      [
+        "-c", "user.name=miah",
+        "-c", "user.email=miah@local",
+        "commit", "-m", `miah: integrate ${unit.id}`,
+      ],
+      // Pipe so a real failure's stderr surfaces in the thrown error and the
+      // "nothing to commit" idempotency check below can actually match (the
+      // commit is a no-op when a resume re-runs an already-committed integrate).
+      { cwd: canonicalWorktree, stdio: "pipe" },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/nothing to commit/i.test(message)) {
+      throw error;
+    }
+  }
 }
 
 /** Outcome of the integration self-containedness check (R54). */
@@ -231,6 +275,11 @@ export async function runIntegrationCheck(input: IntegrationInput): Promise<Inte
     results.push(await runCommand(command, canonicalWorktree));
   }
   const ok = results.every((result) => result.exit_code === 0);
+
+  if (ok) {
+    // R89: commit the integrated deliverables once verification passes.
+    input.commitIntegration?.(canonicalWorktree, unit);
+  }
 
   let gap: JournalEvent | null = null;
   if (!ok) {

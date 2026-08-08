@@ -127,10 +127,37 @@ export type ExecFileFn = (
   callback: (error: cp.ExecFileException | null, stdout: string, stderr: string) => void,
 ) => cp.ChildProcess;
 
+/** Options for a single CLI invocation. */
+export interface CliExecutorOpts {
+  /** Working directory for the exec. */
+  cwd?: string;
+  /** Bounds the exec via `child_process.execFile`'s `timeout` (kills the child). */
+  timeoutMs?: number;
+}
+
 /** The CLI runner the adapter and probe share. Resolves with non-zero exits. */
 export interface CliExecutor {
-  (args: string[], opts?: { cwd?: string }): Promise<CliResult>;
+  (args: string[], opts?: CliExecutorOpts): Promise<CliResult>;
 }
+
+/**
+ * Bound on a single `paseo agent stop` exec. The daemon usually acknowledges
+ * in seconds, but under load — or when the target agent is wedged — the CLI
+ * can block indefinitely. Stopping is best-effort (R5): the driver must be
+ * able to reach the Stopping transition and release the lease even when the
+ * termination acknowledgment is slow, so the stop exec is bounded and a
+ * timeout returns instead of hanging.
+ */
+export const DEFAULT_STOP_EXEC_TIMEOUT_MS = 25_000;
+
+/**
+ * Exit code used to signal that the CLI exec was killed by its own timeout
+ * (`child_process.execFile`'s `timeout` option). Distinct from every paseo CLI
+ * exit code (0/1), so a stop that timed out is recognizable as best-effort
+ * even when the adapter-level race resolves with the exec's result instead of
+ * the race timer.
+ */
+export const EXEC_TIMEOUT_EXIT_CODE = 124;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -256,14 +283,34 @@ export function createDefaultExecutor(execFileImpl?: ExecFileFn): CliExecutor {
         return;
       }
       const fullArgs = [...invocation.argsPrefix, ...args];
+      const execOptions: cp.ExecFileOptions = {
+        cwd: opts.cwd,
+        maxBuffer: 32 * 1024 * 1024,
+        windowsHide: true,
+      };
+      if (opts.timeoutMs !== undefined) {
+        execOptions.timeout = opts.timeoutMs;
+      }
       exec(
         invocation.file,
         fullArgs,
-        { cwd: opts.cwd, maxBuffer: 32 * 1024 * 1024, windowsHide: true },
+        execOptions,
         (error, stdout, stderr) => {
           if (error !== null) {
             if (typeof error.code === "number") {
               resolve({ code: error.code, stdout, stderr, text: `${stdout}${stderr}` });
+              return;
+            }
+            if (error.killed === true) {
+              // execFile killed the child for exceeding `timeout`. Resolve with
+              // the timeout sentinel rather than rejecting, so the caller can
+              // treat a slow (not failed) exec as best-effort.
+              resolve({
+                code: EXEC_TIMEOUT_EXIT_CODE,
+                stdout,
+                stderr,
+                text: `${stdout}${stderr}`,
+              });
               return;
             }
             reject(new PaseoCliUnavailableError(`paseo CLI failed to spawn: ${error.message}`));
@@ -423,7 +470,10 @@ function numberField(value: unknown): number | null {
 }
 
 export class PaseoCliAdapter implements PaseoAdapter {
-  constructor(private readonly exec: CliExecutor = createDefaultExecutor()) {}
+  constructor(
+    private readonly exec: CliExecutor = createDefaultExecutor(),
+    private readonly stopTimeoutMs: number = DEFAULT_STOP_EXEC_TIMEOUT_MS,
+  ) {}
 
   /**
    * Launch a background agent via `paseo run --background --json`. The command
@@ -522,10 +572,55 @@ export class PaseoCliAdapter implements PaseoAdapter {
   }
 
   private async stopOrCancel(handle: PaseoHandle): Promise<void> {
-    const result = await this.exec(["agent", "stop", handle.agentId]);
+    const result = await this.execStopWithTimeout(["agent", "stop", handle.agentId]);
+    if (result === null) {
+      return;
+    }
     const json = extractJsonObject(result.text);
     if (json !== null) {
       assertNoCliError(json, "paseo agent stop", result);
     }
+  }
+
+  /**
+   * Run the stop exec bounded by `stopTimeoutMs`. Resolves `null` when the
+   * exec does not acknowledge within the bound (best-effort: the daemon may
+   * acknowledge later, but the driver must not hang on a slow termination
+   * acknowledgment — it has to reach the Stopping transition and release the
+   * lease regardless). Genuine failures (non-zero exits with a CLI error,
+   * spawn failures) still reject and propagate exactly as before.
+   */
+  private execStopWithTimeout(args: string[]): Promise<CliResult | null> {
+    return new Promise<CliResult | null>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        console.error(
+          `miah adapter: paseo agent stop did not acknowledge within ${this.stopTimeoutMs}ms; terminating best-effort`,
+        );
+        resolve(null);
+      }, this.stopTimeoutMs);
+      this.exec(args, { timeoutMs: this.stopTimeoutMs }).then(
+        (result) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          resolve(result.code === EXEC_TIMEOUT_EXIT_CODE ? null : result);
+        },
+        (error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
   }
 }

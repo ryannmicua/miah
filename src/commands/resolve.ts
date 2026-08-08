@@ -12,12 +12,15 @@
  * again. A run paused in Attention resumes via Attention -> Ready so the next
  * `miah run` re-dispatches (R66, F14).
  */
+import { PaseoCliAdapter, type PaseoAdapter, type PaseoHandle } from "../adapter/paseo";
+import { commitIntegrationFiles, runIntegrationCheck } from "../acceptance";
 import { loadConfig, resolveConfigBasePath } from "../config";
 import { unresolvedEscalations } from "../escalation";
 import { ensurePhase } from "../fsm";
 import { readManifest } from "../manifest";
 import { resolveRunLayout, RunStore } from "../run-store";
-import type { Config } from "../types";
+import { readUnitsFromStore } from "../step";
+import type { Config, PlanUnit, UnitId } from "../types";
 import { operatorIdentity } from "./stop";
 
 /** Exit code when the run or escalation cannot be resolved. */
@@ -30,6 +33,12 @@ export interface ResolveOptions {
   config?: Config;
   basePath?: string;
   holderId?: string;
+  /** Canonical worktree the approved unit's `creates:` integrate into (R89). */
+  canonicalWorktree?: string;
+  /** Verification-contract commands per unit (R45); absent for a unit means no commands run. */
+  verificationCommandsFor?: (unit: PlanUnit) => string[];
+  /** Adapter for recovering the approved unit's last-take worktree (R89). */
+  adapter?: PaseoAdapter;
 }
 
 /**
@@ -101,6 +110,13 @@ export async function runResolve(
         via: "operator-resolve",
         reason: note ?? null,
       });
+
+      // R89: an operator-accepted unit is still accepted, so its `creates:`
+      // deliverables must integrate into the canonical worktree. Recover the
+      // unit's last-take worktree and run the standard integration check
+      // (copy -> verify -> commit). Failure is journaled as the smuggle gap
+      // (the operator's acceptance stands; the gap is surfaced).
+      await integrateApprovedUnit(store, unitId, opts);
     } else if (decision === "rework" && unitId !== null) {
       // Mark the affected unit for re-dispatch (F14).
       store.append("rework_started", { unit_id: unitId, via: "operator-resolve" });
@@ -121,4 +137,63 @@ export async function runResolve(
       // best effort
     }
   }
+}
+
+/**
+ * R89 follow-through for an operator-approved unit: copy its `creates:`
+ * deliverables from the last take's worktree into the canonical worktree, run
+ * the verification contract there, and commit the integration. No-op when no
+ * canonical checkout is configured, the unit declares no `creates:`, or the
+ * worktree can no longer be recovered. A verification failure in the
+ * integrated checkout is journaled as the standard integration-smuggle gap.
+ */
+async function integrateApprovedUnit(
+  store: RunStore,
+  unitId: UnitId,
+  opts: ResolveOptions,
+): Promise<void> {
+  const canonicalWorktree = opts.canonicalWorktree;
+  if (!canonicalWorktree) {
+    return;
+  }
+  const units = readUnitsFromStore(store);
+  const unit = units !== null ? units[unitId] : undefined;
+  if (unit === undefined || (unit.creates ?? []).length === 0) {
+    return;
+  }
+  const created = store.journal
+    .readEvents()
+    .filter((event) => event.type === "dispatch_created" && event.unit_id === unitId)
+    .pop();
+  const agentId = created?.agent_id;
+  if (typeof agentId !== "string" || agentId.length === 0) {
+    return;
+  }
+  const workspaceId = created?.workspace_id;
+  const adapter = opts.adapter ?? new PaseoCliAdapter();
+  let handle: PaseoHandle;
+  try {
+    const inspect = await adapter.inspect({
+      agentId,
+      cwd: null,
+      workspaceId: typeof workspaceId === "string" ? workspaceId : null,
+    });
+    handle = { agentId, cwd: inspect.cwd ?? null, workspaceId: null };
+  } catch {
+    // Best effort: the worktree is no longer recoverable; the acceptance
+    // stands but the deliverable is not integrated into the canonical repo.
+    return;
+  }
+  if (handle.cwd === null) {
+    return;
+  }
+  const verificationCommands = opts.verificationCommandsFor ? opts.verificationCommandsFor(unit) : [];
+  await runIntegrationCheck({
+    store,
+    unit,
+    sourceWorktree: handle.cwd,
+    canonicalWorktree,
+    verificationCommands,
+    commitIntegration: commitIntegrationFiles,
+  });
 }

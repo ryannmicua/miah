@@ -32,6 +32,7 @@ export const RESULT_ENVELOPE_SCHEMA = {
     producer_role: "string: your Miah role (required)",
     attempt_id: "string: the idempotency key from this packet (required)",
     take: "integer: the take number from this packet (required)",
+    unit_id: "string: the Miah unit id this dispatch belongs to (required)",
     self_claim:
       "string: free-form summary of what you did. This is NOT evidence and carries no authority.",
     produced_files:

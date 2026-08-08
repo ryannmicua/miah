@@ -44,10 +44,10 @@ import {
   type DiffRunner,
   type UsageSnapshot,
 } from "./evidence";
-import { evaluateUnitAcceptance } from "./acceptance";
+import { commitIntegrationFiles, evaluateUnitAcceptance } from "./acceptance";
 import { gradeCriterion, type CriterionGrade } from "./grading";
 import { ensurePhase } from "./fsm";
-import { raiseEscalation, type EscalationSummary } from "./escalation";
+import { raiseEscalation, unresolvedEscalations, type EscalationSummary } from "./escalation";
 import { defaultEnvelopePath, readEnvelope, type ResultEnvelope } from "./envelope";
 import type { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
 import type { RunStore } from "./run-store";
@@ -462,7 +462,18 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
 
   const stateNow = store.replay().state;
   const inFlight = stateNow.in_flight_intents;
-  const eligible = findEligibleUnits(stateNow, units);
+  // R66/R82: a unit with an open escalation is NOT dispatch-eligible until the
+  // operator resolves it. Without this guard, an escalation raised during the
+  // reconcile path (step 2) would re-dispatch the unit in step 5 before the
+  // step-7 Attention transition — launching a fresh take past an escalation.
+  const escalatedUnits = new Set<UnitId>(
+    unresolvedEscalations(store)
+      .map((escalation) => escalation.unit_id)
+      .filter((id): id is UnitId => id !== null),
+  );
+  const eligible = findEligibleUnits(stateNow, units).filter(
+    (unit) => !escalatedUnits.has(unit.id),
+  );
 
   // Takes-exhaustion predicate (R77) evaluated synchronously before dispatch.
   for (const unit of eligible) {
@@ -707,6 +718,7 @@ async function harvestAndAccept(
       canonicalWorktree: ctx.canonicalWorktree,
       verificationCommands,
       runCommand: ctx.runCommand,
+      commitIntegration: commitIntegrationFiles,
     },
   });
 
