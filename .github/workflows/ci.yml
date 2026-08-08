@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Unit suite (excludes live-daemon E2E)
+        run: npm test -- --pool=forks --poolOptions.forks.singleFork=true --exclude "test/e2e/**"
+
+      - name: Real-binary smoke test
+        run: npm test -- --pool=forks --poolOptions.forks.singleFork=true test/e2e/bin-smoke.test.ts
