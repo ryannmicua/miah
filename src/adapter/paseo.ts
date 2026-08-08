@@ -88,6 +88,13 @@ export interface PaseoLaunchOptions {
   workspace?: "worktree" | "local";
   /** Defaults to `branch-off`. */
   worktreeMode?: string;
+  /**
+   * Attach the run to an existing Paseo workspace instead of creating a new
+   * one. When set, the launch uses `--workspace <id>` and does NOT pass
+   * `--new-workspace` / `--worktree-mode` (attach-to-project hardening, so a
+   * dispatch from an unrooted cwd never auto-derives a project).
+   */
+  workspaceId?: string;
   baseRef?: string;
   mode?: string;
   /** Extra `--env <key=value>` entries (added, never scrubbed — R88). */
@@ -481,6 +488,9 @@ export class PaseoCliAdapter implements PaseoAdapter {
    *   paseo run --background --json --provider <p> --model <m>
    *           --new-workspace worktree --worktree-mode branch-off
    *           [--title <t>] [--env <k=v>] ... <prompt>
+   *
+   * When `opts.workspaceId` is set, the new-workspace flags are replaced by
+   * `--workspace <id>` so the run attaches to an existing workspace/project.
    */
   async launch(prompt: string, opts: PaseoLaunchOptions): Promise<PaseoHandle> {
     const args: string[] = ["run", "--background", "--json"];
@@ -491,8 +501,12 @@ export class PaseoCliAdapter implements PaseoAdapter {
     if (opts.title !== undefined) {
       args.push("--title", opts.title);
     }
-    args.push("--new-workspace", opts.workspace ?? "worktree");
-    args.push("--worktree-mode", opts.worktreeMode ?? "branch-off");
+    if (opts.workspaceId !== undefined) {
+      args.push("--workspace", opts.workspaceId);
+    } else {
+      args.push("--new-workspace", opts.workspace ?? "worktree");
+      args.push("--worktree-mode", opts.worktreeMode ?? "branch-off");
+    }
     if (opts.baseRef !== undefined) {
       args.push("--base", opts.baseRef);
     }

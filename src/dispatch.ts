@@ -27,9 +27,11 @@ import * as os from "os";
 import * as path from "path";
 import { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
 import { readEnvelope, defaultEnvelopePath, type ResultEnvelope } from "./envelope";
+import { readManifest } from "./manifest";
 import { composePacket, computePacketHash, extractUnitSection, renderPacketPrompt, type DispatchPacket } from "./packet";
 import { RunStore, type RunStoreLayout } from "./run-store";
 import {
+  Config,
   D8I_ROLE_DEFAULTS,
   InFlightIntent,
   JournalEvent,
@@ -87,6 +89,13 @@ export interface DispatchContext {
   gitReader?: GitCommitReader;
   /** `~/.paseo/orchestration-preferences.json` (D8-i), injectable for tests. */
   preferencesPath?: string;
+  /**
+   * Run config (R80 snapshot). The `dispatch.default_workspace` value is read
+   * from here when set; otherwise the run's manifest `config_snapshot` is
+   * consulted (the production path), and absent everywhere the U4
+   * new-worktree contract applies.
+   */
+  config?: Config;
   now?: () => number;
 }
 
@@ -210,6 +219,24 @@ export function defaultGitCommitReader(repoRoot: string): string | null {
 // ---------------------------------------------------------------------------
 // Role defaults (D8-i + operator preferences)
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the workspace id dispatches attach to instead of creating a new
+ * worktree (attach-to-project hardening). Priority: the caller-provided
+ * `ctx.config` (`dispatch.default_workspace`), then the run's admission-time
+ * config snapshot (manifest `config_snapshot`, R80) so a run in progress keeps
+ * the config it was admitted with. Absent everywhere -> undefined, and the U4
+ * `--new-workspace worktree --worktree-mode branch-off` contract applies.
+ */
+function defaultWorkspaceOf(ctx: DispatchContext): string | undefined {
+  const fromCtx = ctx.config?.dispatch?.default_workspace;
+  if (typeof fromCtx === "string" && fromCtx.length > 0) {
+    return fromCtx;
+  }
+  const manifest = readManifest(ctx.store.layout);
+  const fromSnapshot = manifest?.config_snapshot?.dispatch?.default_workspace;
+  return typeof fromSnapshot === "string" && fromSnapshot.length > 0 ? fromSnapshot : undefined;
+}
 
 function readRolePreferences(preferencesPath?: string): Record<string, unknown> | null {
   const filePath =
@@ -336,6 +363,7 @@ export async function dispatchUnit(
       title: dispatchTitle(opts.role, opts.unit.id, opts.take),
       workspace: "worktree",
       worktreeMode: "branch-off",
+      workspaceId: defaultWorkspaceOf(ctx),
       cwd: ctx.repoRoot,
     });
     const baseCommit = (ctx.gitReader ?? defaultGitCommitReader)(ctx.repoRoot);

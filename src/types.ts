@@ -30,6 +30,12 @@ export interface DispatchConfig {
   max_duration: number;
   /** No-progress polls (R76): escalate after this many consecutive polls with no change while alive and polling. */
   no_progress_polls: number;
+  /**
+   * Existing Paseo workspace id dispatches attach to instead of creating a
+   * new worktree (attach-to-project hardening). Absent/undefined: the U4
+   * `--new-workspace worktree --worktree-mode branch-off` contract applies.
+   */
+  default_workspace?: string;
 }
 
 /** Run thresholds (R75, R77, R78). */

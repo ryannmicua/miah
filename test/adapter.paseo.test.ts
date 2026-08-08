@@ -203,6 +203,20 @@ describe("adapter launch", () => {
     expect(args[args.indexOf("--mode") + 1]).toBe("plan");
   });
 
+  it("launch with workspaceId attaches to the existing workspace: --workspace <id>, no --new-workspace", async () => {
+    const { exec, calls } = fakeExecutor(() => ({ stdout: '{"agentId":"a9","status":"running"}' }));
+    const adapter = new PaseoCliAdapter(exec);
+    await adapter.launch("task", {
+      provider: "opencode",
+      workspaceId: "wks_existing",
+    });
+    const args = calls[0];
+    expect(args).toContain("--workspace");
+    expect(args[args.indexOf("--workspace") + 1]).toBe("wks_existing");
+    expect(args).not.toContain("--new-workspace");
+    expect(args).not.toContain("--worktree-mode");
+  });
+
   it("throws PaseoCliError with the CLI code/message on an error object", async () => {
     const { exec } = fakeExecutor(() => ({ stdout: LIVE_ERROR_OUTPUT, exitCode: 1 }));
     const adapter = new PaseoCliAdapter(exec);

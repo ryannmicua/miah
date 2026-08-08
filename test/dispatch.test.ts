@@ -21,10 +21,12 @@ import {
   type ReconcileResult,
 } from "../src/dispatch";
 import { writeEnvelope, type ResultEnvelope } from "../src/envelope";
+import { writeManifest } from "../src/manifest";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
 import {
   cleanupTempDirs,
   createTestStore,
+  fastConfig,
   makeTempDir,
   type TestStore,
 } from "./helpers";
@@ -194,6 +196,88 @@ describe("dispatch pipeline", () => {
     // No created event: the adapter never produced a handle.
     const types = t.store.journal.readEvents().map((event) => event.type);
     expect(types).not.toContain("dispatch_created");
+  });
+
+  it("dispatch attaches to config.dispatch.default_workspace when set (attach-to-project, U4 hardening)", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    const adapter = new ScriptedAdapter();
+    adapter.launchResult = { agentId: "agent-1", cwd: worktree, workspaceId: "wks_1" };
+
+    const ctx = makeCtx(t, adapter, {
+      gitReader: () => "commit-fake",
+      config: fastConfig({ dispatch: { default_workspace: "wks_default" } }),
+    });
+    const outcome = await dispatchUnit(ctx, {
+      unit: UNIT_U1,
+      role: "builder",
+      take: 1,
+      deadline: futureDeadline(t.clock.now),
+    });
+
+    expect(outcome.status).toBe("created");
+    if (outcome.status !== "created") {
+      return;
+    }
+    // The adapter launch carries the workspace id; the U4 new-worktree fields
+    // stay set but are inert when workspaceId wins (the adapter emits
+    // `--workspace <id>` instead of `--new-workspace`).
+    expect(adapter.launchCalls[0].opts.workspaceId).toBe("wks_default");
+    expect(adapter.launchCalls[0].opts.workspace).toBe("worktree");
+    expect(adapter.launchCalls[0].opts.worktreeMode).toBe("branch-off");
+  });
+
+  it("dispatch reads default_workspace from the run's admission-time config snapshot when ctx.config is absent (R80)", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    const adapter = new ScriptedAdapter();
+    adapter.launchResult = { agentId: "agent-1", cwd: worktree, workspaceId: "wks_1" };
+    writeManifest(t.layout, {
+      schema_version: 1,
+      run_id: t.layout.runId,
+      plan_hash: "a".repeat(64),
+      plan_snapshot_file: "plan-snapshot.v1.md",
+      created_at: new Date().toISOString(),
+      config_snapshot: fastConfig({ dispatch: { default_workspace: "wks_from_manifest" } }),
+      probe_verdicts: {},
+    });
+
+    const ctx = makeCtx(t, adapter, { gitReader: () => "commit-fake" });
+    const outcome = await dispatchUnit(ctx, {
+      unit: UNIT_U1,
+      role: "builder",
+      take: 1,
+      deadline: futureDeadline(t.clock.now),
+    });
+
+    expect(outcome.status).toBe("created");
+    if (outcome.status !== "created") {
+      return;
+    }
+    expect(adapter.launchCalls[0].opts.workspaceId).toBe("wks_from_manifest");
+  });
+
+  it("dispatch falls back to the U4 new-worktree contract when no default_workspace is configured", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    const adapter = new ScriptedAdapter();
+    adapter.launchResult = { agentId: "agent-1", cwd: worktree, workspaceId: "wks_1" };
+
+    const ctx = makeCtx(t, adapter, { gitReader: () => "commit-fake" });
+    const outcome = await dispatchUnit(ctx, {
+      unit: UNIT_U1,
+      role: "builder",
+      take: 1,
+      deadline: futureDeadline(t.clock.now),
+    });
+
+    expect(outcome.status).toBe("created");
+    if (outcome.status !== "created") {
+      return;
+    }
+    expect(adapter.launchCalls[0].opts.workspaceId).toBeUndefined();
+    expect(adapter.launchCalls[0].opts.workspace).toBe("worktree");
+    expect(adapter.launchCalls[0].opts.worktreeMode).toBe("branch-off");
   });
 
   it("dispatch_intent carries sender role, unit id, take, idempotency key, packet hash, deadline, provider/model (D8-i)", async () => {
