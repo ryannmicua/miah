@@ -16,7 +16,7 @@ applies_when: "An adapter dispatches agents via `paseo run --new-workspace workt
 
 The sibling pattern `attach-workspace-to-existing-project.md` documents the CLI-level rule: create the workspace once with `paseo workspace create --project <id> --isolation local --path <dir>`, then target it by id on every dispatch with `paseo run --workspace <id>`, and never let `paseo run --new-workspace worktree` auto-derive a project from an unrooted cwd (the 19-orphan-project incident).
 
-That pattern lives at the workspace-management layer — the operator creates the workspace by hand and passes the id. It does not answer: **how does the adapter, driven by the run's config, know which workspace to attach to?** The Miah v1 implementation answered this in commit `92f644b` (session `ses_01effaed5ffeUd5QX1vg3YQPva`, 2026-08-08) by adding a `dispatch.default_workspace` field to the run config and a `defaultWorkspaceOf()` resolver in `src/dispatch.ts` that the adapter reads on every dispatch.
+That pattern lives at the workspace-management layer — the operator creates the workspace by hand and passes the id. It does not answer: **how does the adapter, driven by the run's config, know which workspace to attach to?** The Miah v1 implementation answered this in the `fix(U4): adapter workspace binding and dispatch.default_workspace` commit, shipped in PR #1 (squash commit `d7eac30`; session `ses_01effaed5ffeUd5QX1vg3YQPva`, 2026-08-08) by adding a `dispatch.default_workspace` field to the run config and a `defaultWorkspaceOf()` resolver in `src/dispatch.ts` that the adapter reads on every dispatch.
 
 The fix touched three files:
 
@@ -60,11 +60,11 @@ This is the same topology-discipline principle the sibling pattern institutional
 
 ## Examples
 
-**Wrong way (pre-`92f644b`):**
+**Wrong way (before the fix):**
 - `src/adapter/paseo.ts` `launch()` unconditionally pushes `--new-workspace worktree --worktree-mode branch-off`. Every dispatch from an unrooted cwd auto-derives a project. Orphans accumulate.
 - The operator must pass a per-dispatch CLI flag to attach to an existing workspace — there is no config-level mechanism, so the operator must remember every time.
 
-**Right way (commit `92f644b`):**
+**Right way (fix commit in PR #1, squash `d7eac30`):**
 ```ts
 // src/types.ts — one optional field
 export interface DispatchConfig {
@@ -90,6 +90,6 @@ if (opts.workspaceId !== undefined) {
   args.push("--worktree-mode", opts.worktreeMode ?? "branch-off");
 }
 ```
-- `test/adapter.paseo.test.ts` (commit `92f644b`, +14 lines): `workspaceId` set → args contain `--workspace <id>`, not `--new-workspace`.
-- `test/dispatch.test.ts` (commit `92f644b`, +84 lines): `defaultWorkspaceOf` reads from `ctx.config`, then from `manifest.config_snapshot`, then absent; dispatch passes `workspaceId` to the adapter accordingly.
+- `test/adapter.paseo.test.ts` (PR #1, squash `d7eac30`, +14 lines): `workspaceId` set → args contain `--workspace <id>`, not `--new-workspace`.
+- `test/dispatch.test.ts` (PR #1, squash `d7eac30`, +84 lines): `defaultWorkspaceOf` reads from `ctx.config`, then from `manifest.config_snapshot`, then absent; dispatch passes `workspaceId` to the adapter accordingly.
 - Sibling pattern `attach-workspace-to-existing-project.md` covers the CLI-level workspace-creation discipline; this pattern covers the adapter-level config-driven attachment. Together they make the topology honest end-to-end.

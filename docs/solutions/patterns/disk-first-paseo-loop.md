@@ -63,7 +63,7 @@ This is the same principle **Miah itself institutionalizes one level down**: `di
 - Treating session death as an incident requiring investigation before the loop can proceed.
 
 **Right way (from the U3 incident):**
-Builder commits U3 with all gates passing → session dies before it can report → dispatcher checks git, sees commit `9021851`, tree clean → tester dispatched fresh with *"no report exists, verify from scratch"* → tester re-runs every gate itself, returns PASS, unit accepted.
+Builder commits U3 with all gates passing → session dies before it can report → dispatcher checks git, sees commit `9021851` (U3; on the feature branch, now shipped in PR #1, squash `d7eac30`), tree clean → tester dispatched fresh with *"no report exists, verify from scratch"* → tester re-runs every gate itself, returns PASS, unit accepted.
 
 - **Lost:** a summary message.
 - **Preserved:** everything that counts.

@@ -12,13 +12,13 @@ applies_when: "Designing or debugging a finite-state machine where a transition'
 
 ## Context
 
-Miah v1's run-phase FSM (KTD14 in the plan) has eight phases: `Admitting`, `Ready`, `Implementing`, `Reviewing`, `AwaitingApproval`, `Attention`, `Stopping`, `Complete`. The original implementation (commit `e895ec9`, U8) encoded transition legality as a **static adjacency table** — `PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]>` — with `isValidTransition(from, to)` checking only that `to` appears in `from`'s allowed list. This is correct for transitions whose legality depends only on the two phases (e.g. `Admitting → Ready` after the lease is acquired, `Implementing → Reviewing` when a candidate is frozen).
+Miah v1's run-phase FSM (KTD14 in the plan) has eight phases: `Admitting`, `Ready`, `Implementing`, `Reviewing`, `AwaitingApproval`, `Attention`, `Stopping`, `Complete`. The original implementation (U8; shipped in PR #1, squash commit `d7eac30`) encoded transition legality as a **static adjacency table** — `PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]>` — with `isValidTransition(from, to)` checking only that `to` appears in `from`'s allowed list. This is correct for transitions whose legality depends only on the two phases (e.g. `Admitting → Ready` after the lease is acquired, `Implementing → Reviewing` when a candidate is frozen).
 
 The gap surfaced during the post-completion hardening pass (session `ses_01effaed5ffeUd5QX1vg3YQPva`, 2026-08-08). The plan's D6-e says: when all units are accepted, Miah transitions to `AwaitingApproval` and the operator runs `miah approve` (→ `Complete`) or `miah reject --rework <unit-ids>` (marks units for re-dispatch). D6-f says `miah amend` resumes only affected units. The operator can mark units for re-dispatch **while the run sits at the `AwaitingApproval` gate** — the journal records `acceptance_decision: reject` with rework targets, or `amendment_applied` with affected unit ids, and the marked units' derived status becomes `rework` or `not_started`.
 
-The bug: the driver, on resume, saw `initialPhase === "AwaitingApproval"` and unconditionally wrote the approval package and returned `complete` (commit `e895ec9`, `src/driver.ts` at the time). The `AwaitingApproval → Ready` transition — the R67 resume — was not in the static transition table, so it was not even a legal transition. A run with rework-marked units at the gate would silently complete instead of resuming, leaving the marked units re-dispatched only on paper. The marking worked; the resume did not.
+The bug: the driver, on resume, saw `initialPhase === "AwaitingApproval"` and unconditionally wrote the approval package and returned `complete` (original U8 implementation, `src/driver.ts` at the time). The `AwaitingApproval → Ready` transition — the R67 resume — was not in the static transition table, so it was not even a legal transition. A run with rework-marked units at the gate would silently complete instead of resuming, leaving the marked units re-dispatched only on paper. The marking worked; the resume did not.
 
-The fix (commit `a6b7949`, session `ses_01effaed5ffeUd5QX1vg3YQPva`) made the transition validator state-aware:
+The fix (the `fix(U8): resume from AwaitingApproval when units are marked for rework` commit; shipped in PR #1, squash `d7eac30`; session `ses_01effaed5ffeUd5QX1vg3YQPva`) made the transition validator state-aware:
 
 - `hasReworkMarkedUnits(state: DerivedState): boolean` — returns true when any unit's derived status is `rework` or `not_started`.
 - `isValidTransition(from, to, state?)` — the `AwaitingApproval → Ready` transition is allowed **only when `state` shows rework-marked units**; without them, the gate's only legal exit is `Complete`.
@@ -58,12 +58,12 @@ This is the same state-awareness discipline Miah itself institutionalizes one le
 
 ## Examples
 
-**Wrong way (the bug, commit `e895ec9`):**
+**Wrong way (the bug, original U8 implementation in PR #1, squash `d7eac30`):**
 - `isValidTransition(from, to)` checks only `PHASE_TRANSITIONS[from].includes(to)`. `AwaitingApproval → Ready` is not in the table.
 - Driver at `AwaitingApproval`: `writeApprovalPackage(store); return complete;` — unconditionally.
 - Operator runs `miah reject --rework U2`, then `miah run` → run completes; U2 is "rework" in the journal but was never re-dispatched. Silent data loss.
 
-**Right way (the fix, commit `a6b7949`):**
+**Right way (the fix, `fix(U8)` commit in PR #1, squash `d7eac30`):**
 ```ts
 // fsm.ts
 export function hasReworkMarkedUnits(state: DerivedState): boolean {
@@ -90,6 +90,6 @@ if (initialPhase === "AwaitingApproval") {
   }
 }
 ```
-- `test/driver.test.ts` (commit `a6b7949`): mark units for rework → `runDriver` → assert `phase === "Ready"`, units re-dispatched.
+- `test/driver.test.ts` (PR #1, squash `d7eac30`): mark units for rework → `runDriver` → assert `phase === "Ready"`, units re-dispatched.
 - `test/fsm.test.ts`: `isValidTransition("AwaitingApproval", "Ready", stateWithoutRework) === false`; `isValidTransition("AwaitingApproval", "Ready", stateWithRework) === true`.
 - `test/reject.command.test.ts`: `miah reject --rework U2` → next `miah run` resumes at `Ready`.

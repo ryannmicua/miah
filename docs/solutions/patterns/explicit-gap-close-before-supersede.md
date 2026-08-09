@@ -22,7 +22,7 @@ The bug was reachable today: `miah resolve --decision approve` when the unit has
 
 The review also noted: no test covers an open gap surviving to `run_terminal` — the acceptance predicate was unit-tested for the "all-criteria-pass + no-blocking-gap" happy path and the "blocking gap present" rejection path, but never the "operator accepts with a different gap still open" path (§4, gap 1).
 
-The fix (commit `f727b0c`, "fix(M1): journal gap_closed for implicitly-closed gaps on operator approval") added a loop in `src/commands/resolve.ts` that journals a `gap_closed` event **per remaining open gap** BEFORE the `acceptance_decision: accept`:
+The fix (the `fix(M1): journal gap_closed for implicitly-closed gaps on operator approval` commit; shipped in PR #1, squash `d7eac30`) added a loop in `src/commands/resolve.ts` that journals a `gap_closed` event **per remaining open gap** BEFORE the `acceptance_decision: accept`:
 
 ```ts
 for (const gap of store.stateSnapshot().open_gaps) {
@@ -72,11 +72,11 @@ This is the same honesty discipline Miah itself institutionalizes one level down
 
 ## Examples
 
-**Wrong way (the bug, pre-`f727b0c`):**
+**Wrong way (the bug, before the M1 fix):**
 - `src/commands/resolve.ts` accepts the unit after closing only the escalation's criterion. Other open gaps on the unit are dropped from derived state by `acceptance_decision: accept` with no `gap_closed` events. The approval package's `gap_close_reasons` list omits them. The journal is honest; the derived view is not.
 - No test covers the implicitly-closed path — the acceptance predicate's suite covers accept-happy and reject-blocking, not accept-with-other-gap-open.
 
-**Right way (the fix, commit `f727b0c`):**
+**Right way (the fix, `fix(M1)` commit in PR #1, squash `d7eac30`):**
 ```ts
 // src/commands/resolve.ts — journal close events BEFORE the acceptance
 for (const gap of store.stateSnapshot().open_gaps) {
@@ -89,6 +89,6 @@ for (const gap of store.stateSnapshot().open_gaps) {
 }
 store.append("acceptance_decision", { unit_id: unitId, decision: "accept" });
 ```
-- `test/resolve.command.test.ts` (commit `f727b0c`, +67 lines): unit with two open gaps → `miah resolve --decision approve` → both gaps appear as `gap_closed` with `close_reason: "operator-approval"` → approval package's `gap_close_reasons` list includes both.
+- `test/resolve.command.test.ts` (PR #1, squash `d7eac30`, +67 lines): unit with two open gaps → `miah resolve --decision approve` → both gaps appear as `gap_closed` with `close_reason: "operator-approval"` → approval package's `gap_close_reasons` list includes both.
 - Code review §2 M1 finding: "acceptance_decision: accept silently drops every open gap on the unit from derived state without a paired gap_closed event. Soft violation of R50 'a problem cannot disappear silently'."
 - Code review §4 gap 1: "Open gap surviving to run_terminal is untested" — the fix commit added the test.

@@ -8,7 +8,7 @@
 
 **AwaitingApproval** — The run-phase reached when all units have been accepted. The operator drives the exit: `miah approve` → `Complete`, `miah reject --rework <units>` → marks units for re-dispatch, `miah reject --end` → `rejected`. The `R67 resume` transition (`AwaitingApproval → Ready`) fires when the operator has marked units for rework at the gate — see `docs/solutions/patterns/state-aware-fsm-transition-guards.md`.
 
-**Approval package** — The consolidated evidence summary written to `~/.miah/runs/<run-id>/approval-package.json` at `AwaitingApproval`: per-unit evidence pointers, acceptance records, gap close reasons, usage totals, snapshot hash, run duration (R67). Its `gap_close_reasons` list is derived from `gap_closed` journal events — implicitly-closed gaps must be journaled explicitly or the package is incomplete (see `docs/solutions/patterns/explicit-gap-close-before-supersede.md`).
+**Approval package** — The consolidated evidence summary written to the run directory at `AwaitingApproval`: per-unit evidence pointers, acceptance records, gap close reasons, usage totals, snapshot hash, run duration (R67). Its `gap_close_reasons` list is derived from `gap_closed` journal events — implicitly-closed gaps must be journaled explicitly or the package is incomplete (see `docs/solutions/patterns/explicit-gap-close-before-supersede.md`).
 
 **Config snapshot** — The admission-time copy of the run's config, stored in the run manifest (R80). Dispatch reads the snapshot, not the live config file, so a run in progress keeps the config it was admitted with. See `dispatch.default_workspace` for a field that is read from the snapshot at dispatch time.
 
@@ -16,9 +16,9 @@
 
 **Kill drill** — The three-level crash-recovery verification pattern that proves "resume is the only implementation": v1 (journal/lease level, U3), v2 (dispatch level, U5), v3 (full E2E, U10). Each level kills the supervisor mid-run, resumes, and asserts byte-identical derived state. See `docs/solutions/patterns/kill-drill-byte-identical-resume-verification.md`.
 
-**G-criteria** — Per-unit audit criteria in the plan-audit file (`docs/plans/2026-08-06-003-miah-implementation-plan.audit.md`). Each criterion cites its plan source and is verified by evidence (command output, file existence, code inspection) — never agent prose. Verdicts are binary: `PASS` (evidence shown) or `FAIL` (evidence missing or contradicts). See `docs/solutions/patterns/cross-family-verifier-audit-g-criteria.md`.
+**G-criteria** — Per-unit audit criteria derived from the plan into a checkable audit file. Each criterion cites its plan source and is verified by evidence (command output, file existence, code inspection) — never agent prose. Verdicts are binary: `PASS` (evidence shown) or `FAIL` (evidence missing or contradicts). See `docs/solutions/patterns/cross-family-verifier-audit-g-criteria.md`.
 
-**Cross-family verifier** — A checker dispatched on a different model family than the builder (e.g. builder on `deepseek-v4-flash`, tester on `glm-5.2`). Cross-family contrast is a hedge against shared-training blind spots, not the authority — calibration is the authority (R20). The builder's self-report is an input, not a fact.
+**Cross-family verifier** — A checker dispatched on a different model family than the builder (e.g. builder on one family's flash model, tester on another vendor's model). Cross-family contrast is a hedge against shared-training blind spots, not the authority — calibration is the authority (R20). The builder's self-report is an input, not a fact.
 
 ## Gaps and evidence
 
@@ -28,4 +28,4 @@
 
 ## Dispatch
 
-**`dispatch.default_workspace`** — An optional field on `DispatchConfig` (`src/types.ts`): an existing Paseo workspace id that dispatches attach to via `--workspace <id>` instead of creating a new worktree via `--new-workspace worktree`. Absent/undefined is the default — the U4 new-worktree contract applies. Read from the run's config snapshot (R80) at dispatch time so a run in progress keeps its workspace policy. See `docs/solutions/patterns/adapter-default-workspace-config-field.md`.
+**`dispatch.default_workspace`** — An optional field on the dispatch config: an existing Paseo workspace id that dispatches attach to via `--workspace <id>` instead of creating a new worktree. Absent/undefined is the default — the new-worktree contract applies. Read from the run's config snapshot (R80) at dispatch time so a run in progress keeps its workspace policy. See `docs/solutions/patterns/adapter-default-workspace-config-field.md`.
