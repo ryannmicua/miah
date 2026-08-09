@@ -10,12 +10,15 @@ Miah v1 is shipped: implemented per plan R1–R90 and merged via PR #1 (squash c
 
 Install and build with `npm ci && npm run build`, then use the `miah` CLI: `preflight | start | run | status | stop | resolve | approve | reject | amend | list`. Live-daemon E2E tests require the Paseo daemon; on hosts without it they are gated on `paseoCliAvailable()` and skip rather than fail. Run an agent from this directory and follow `AGENTS.md`.
 
+**Operator or agent driving Miah? Start at [`OPERATOR.md`](./OPERATOR.md)** — prerequisites, plan format, the command sequence, and what Miah asks you to decide.
+
 ## Layout
 
 - `AGENTS.md` — phase-aware operating instructions; rewrites itself as the project advances
 - `VISION.md` — canonical product vision (approved)
 - `STRATEGY.md` — derived strategic framing and planning priorities
 - `CONCEPTS.md` — shared domain vocabulary (knowledge store)
+- `OPERATOR.md` — operator manual starting point: prerequisites, plan format, command sequence, operator decisions
 - `src/` — CLI implementation (`miah`)
 - `test/` — unit + E2E suites, including the kill drill
 - `docs/` — durable artifacts: plans (`docs/plans/`), decisions, research, reviews (`docs/reviews/`), compound learnings (`docs/solutions/`), and session digests (`docs/session-digests/`)

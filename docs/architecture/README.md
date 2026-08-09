@@ -50,7 +50,7 @@ When documents disagree, the higher authority wins; the lower document is wrong,
 | **Problem history** (patterns store) | `docs/solutions/patterns/` | Incidents, root causes, and fixes; this set states the current design and **links** to the history, never re-narrates it |
 | **Design origin** (plan + ADR) | `docs/plans/`, `docs/decisions/` | Approved intent; this set distills decisions and cites `PLAN:`/`ADR:` anchors rather than restating requirements |
 | **Frozen authority** | `VISION.md`, `STRATEGY.md`, `CONCEPTS.md` | Product definition, derived strategy, and vocabulary; this set never restates product behavior or introduces scope |
-| **Operator-facing usage** | none in-repo (v1 ships no user guide) | A Diataxis usage set would live separately; not part of this set |
+| **Operator-facing usage** | [`OPERATOR.md`](../../OPERATOR.md) (repo root) | The operator manual starting point: prerequisites, plan format, command sequence, operator decisions; this set states the current design, the manual is the usage entry point |
 | **Session records** | `docs/session-digests/` | Prior-session narrative; out of scope for this set |
 
 ## Last-verified convention
