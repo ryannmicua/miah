@@ -203,9 +203,12 @@ describe("status command", () => {
     const { code } = captureSync(() => runStatus(run.runId, { basePath: run.basePath }));
     expect(code).toBe(0);
     const { events } = readJournalFile(path.join(run.basePath, "runs", run.runId, "journal.jsonl"));
-    // Admission wrote exactly lease_acquired + run_start; status adds nothing.
-    expect(events).toHaveLength(2);
+    // Admission wrote lease_acquired + run_start + Admitting phase transition;
+    // status adds nothing.
+    expect(events).toHaveLength(3);
     expect(events[0].type).toBe("lease_acquired");
     expect(events[1].type).toBe("run_start");
+    expect(events[2].type).toBe("phase_transition");
+    expect(events[2]).toMatchObject({ from: "not-started", to: "Admitting" });
   });
 });

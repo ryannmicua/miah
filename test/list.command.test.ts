@@ -92,7 +92,7 @@ describe("list command", () => {
     expect(stdout).toContain(runB);
     expect(stdout).toContain("List Plan Alpha");
     expect(stdout).toContain("List Plan Beta");
-    expect(stdout).toContain("not-started");
+    expect(stdout).toContain("Admitting");
     expect(stdout).toContain("last activity:");
   });
 

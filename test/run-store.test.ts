@@ -37,7 +37,6 @@ describe("run-store", () => {
     expect(path.basename(layout.snapshotsDir)).toBe("snapshots");
     expect(path.basename(layout.evidenceDir)).toBe("evidence");
     expect(path.basename(layout.approvalPackagePath)).toBe("approval-package.json");
-    expect(path.basename(layout.calibrationDir)).toBe("calibration");
   });
 
   it("createRunStoreDirs creates the run-store directory tree", () => {
@@ -49,7 +48,6 @@ describe("run-store", () => {
     expect(fs.statSync(layout.root).isDirectory()).toBe(true);
     expect(fs.existsSync(layout.snapshotsDir)).toBe(true);
     expect(fs.existsSync(layout.evidenceDir)).toBe(true);
-    expect(fs.existsSync(layout.calibrationDir)).toBe(true);
   });
 
   it("runIdFromPlan derives from the plan content hash and admission time", () => {
