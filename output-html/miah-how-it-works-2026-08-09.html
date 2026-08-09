@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Miah works — the resumable plan-supervisor CLI</title>
+  <style>
+    :root {
+      --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --canvas: #f7f3e8;
+      --surface: #fffdf8;
+      --surface-strong: #ffffff;
+      --ink: #15243a;
+      --muted: #647185;
+      --blue: #153d6f;
+      --blue-soft: #dce8f5;
+      --gold: #c7922f;
+      --gold-soft: #f4e4b9;
+      --border: #ccd6e2;
+      --success: #28795a;
+      --success-soft: #dcefe5;
+      --warning: #9a641c;
+      --warning-soft: #f6e7cf;
+      --danger: #a33b3b;
+      --danger-soft: #f6dddd;
+      --space-1: .25rem;
+      --space-2: .5rem;
+      --space-3: .75rem;
+      --space-4: 1rem;
+      --space-5: 1.5rem;
+      --space-6: 2rem;
+      --space-7: 3rem;
+      --space-8: 4.5rem;
+      --radius-sm: .5rem;
+      --radius-md: .9rem;
+      --radius-lg: 1.4rem;
+      --shadow: 0 14px 40px rgba(21, 61, 111, .09);
+      --content: 76rem;
+    }
+    * { box-sizing: border-box; }
+    html { color-scheme: light; scroll-behavior: smooth; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--font-sans); line-height: 1.6; }
+    a { color: var(--blue); }
+    :focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+    .shell { width: min(calc(100% - 2rem), var(--content)); margin-inline: auto; padding-block: var(--space-7); }
+    .eyebrow { color: var(--gold); font-size: .78rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, h3, h4 { color: var(--blue); line-height: 1.15; text-wrap: balance; }
+    h1 { max-width: 22ch; margin: var(--space-2) 0 var(--space-4); font-size: clamp(2.2rem, 5.5vw, 4.6rem); letter-spacing: -.045em; }
+    h2 { margin-top: 0; font-size: clamp(1.45rem, 3vw, 2.2rem); }
+    h3 { font-size: 1.12rem; margin: var(--space-2) 0 var(--space-2); }
+    .lede { max-width: 72ch; color: var(--muted); font-size: clamp(1.05rem, 2vw, 1.25rem); }
+    .panel { margin-top: var(--space-6); padding: clamp(1.25rem, 4vw, 2.25rem); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: var(--space-4); }
+    .card { padding: var(--space-5); background: var(--surface-strong); border: 1px solid var(--border); border-radius: var(--radius-md); }
+    .card p { margin: var(--space-2) 0 0; color: var(--muted); font-size: .95rem; }
+    .metric { color: var(--blue); font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 800; line-height: 1; }
+    .tag { display: inline-flex; padding: .28rem .65rem; background: var(--gold-soft); color: #69450d; border-radius: 999px; font-size: .78rem; font-weight: 750; }
+    .tag.blue { background: var(--blue-soft); color: var(--blue); }
+    .tag.green { background: var(--success-soft); color: var(--success); }
+    .tag.red { background: var(--danger-soft); color: var(--danger); }
+    code { font-family: var(--font-mono); font-size: .86em; background: var(--blue-soft); padding: .1em .35em; border-radius: .3em; }
+    .cmd { display: inline-block; font-family: var(--font-mono); font-size: .86rem; background: #eef2f8; border: 1px solid var(--border); border-radius: .4rem; padding: .28rem .6rem; margin: .12rem 0; white-space: nowrap; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .85rem 1rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    th { color: var(--blue); background: var(--blue-soft); }
+    /* ---- tabs ---- */
+    .tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+    .tab-btn { appearance: none; border: 1px solid var(--border); background: var(--surface-strong); color: var(--blue); font: inherit; font-weight: 700; padding: .55rem 1rem; border-radius: 999px; cursor: pointer; }
+    .tab-btn[aria-selected="true"] { background: var(--blue); color: #fff; border-color: var(--blue); }
+    .tab-panel { display: none; margin-top: var(--space-4); }
+    .tab-panel.active { display: block; }
+    /* ---- flow diagram ---- */
+    .flow { display: flex; flex-wrap: wrap; align-items: stretch; justify-content: center; gap: var(--space-3); }
+    .node { min-width: 9.5rem; max-width: 12rem; padding: var(--space-4); background: var(--blue-soft); border: 1px solid var(--blue); border-radius: var(--radius-md); text-align: center; font-weight: 700; }
+    .node small { display: block; font-weight: 500; color: var(--muted); margin-top: .25rem; font-size: .82rem; }
+    .node.gate { background: var(--gold-soft); border-color: var(--gold); }
+    .node.attention { background: var(--danger-soft); border-color: var(--danger); }
+    .node.done { background: var(--success-soft); border-color: var(--success); }
+    .arrow { align-self: center; color: var(--gold); font-size: 1.4rem; font-weight: 900; }
+    .arrow small { display: block; font-size: .68rem; color: var(--muted); font-weight: 600; text-align: center; max-width: 7rem; }
+    /* ---- state machine ---- */
+    .fsm { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: var(--space-3); }
+    .phase { padding: var(--space-4) var(--space-3); background: var(--surface-strong); border: 1px solid var(--border); border-radius: var(--radius-md); text-align: center; }
+    .phase b { color: var(--blue); display: block; }
+    .phase small { color: var(--muted); font-size: .8rem; }
+    .phase.term { border-color: var(--success); }
+    .phase.pause { border-color: var(--gold); }
+    /* ---- timeline ---- */
+    .timeline { display: grid; gap: var(--space-4); border-left: 3px solid var(--gold); padding-left: var(--space-5); margin-top: var(--space-4); }
+    .timeline article { position: relative; }
+    .timeline article::before { content: ""; position: absolute; left: calc(-1.5rem - 7px); top: .45rem; width: 11px; height: 11px; background: var(--gold); border: 3px solid var(--canvas); border-radius: 50%; }
+    .timeline h3 { margin: 0; }
+    .timeline p { margin: .3rem 0 0; color: var(--muted); font-size: .95rem; }
+    .note { margin-top: var(--space-4); padding: var(--space-4); border-left: 4px solid var(--gold); background: var(--gold-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .note p { margin: 0; }
+    footer { margin-top: var(--space-7); color: var(--muted); font-size: .88rem; }
+    @media (max-width: 40rem) { .shell { padding-block: var(--space-6); } .arrow { transform: rotate(90deg); } }
+    @media print { body { background: white; } .shell { width: 100%; padding: 0; } .panel { box-shadow: none; break-inside: avoid; } }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">Miah v1 · plan-supervisor CLI · shipped</div>
+      <h1>How Miah runs a plan</h1>
+      <p class="lede">Miah is a command-line supervisor that takes one approved plan and drives it to completion through specialist agents — with everything it does recorded to disk so it can survive crashes, and nothing decided without evidence. This explainer follows the operational path: how you use it, what happens at each step, and the design underneath.</p>
+    </header>
+
+    <section class="panel" aria-labelledby="summary-title">
+      <h2 id="summary-title">The idea in one breath</h2>
+      <div class="grid">
+        <article class="card"><span class="tag">Core loop</span><h3>One immutable plan</h3><p>You approve a plan once. Miah snapshots it, then executes that exact snapshot — unit by unit, in dependency order — with agents that work in isolated worktrees.</p></article>
+        <article class="card"><span class="tag">Evidence, not prose</span><h3>Verification is mechanical</h3><p>Builders and reviewers are separate agents on different model families. Verdicts only count when backed by harvested artifacts — diffs, exit codes, test output — not agent claims.</p></article>
+        <article class="card"><span class="tag">Disk-first</span><h3>Crash-safe by construction</h3><p>Every event is appended to a journal on disk. A kill at any moment is recovered by replaying the journal — proven by kill drills that assert byte-identical state.</p></article>
+        <article class="card"><span class="tag">You stay in control</span><h3>Operator gates</h3><p>Miah has bounded autonomy: escalations pause for your decision, and the final approval package is yours to accept, rework, or reject.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="loop-title">
+      <h2 id="loop-title">The operating loop, end to end</h2>
+      <p class="lede">Five stages. You drive the first, the last, and every pause; Miah drives the middle with strict limits on how long it will push on its own.</p>
+      <div class="flow" style="margin-top:var(--space-5)">
+        <div class="node">1 · Admit <small><code>miah start plan.md</code> — preflight, probe, snapshot, journal</small></div>
+        <div class="arrow">→<small>lease + run_start</small></div>
+        <div class="node">2 · Drive <small><code>miah run</code> — dispatch builder → harvest → dispatch verifier</small></div>
+        <div class="arrow">→<small>per unit</small></div>
+        <div class="node gate">3 · Gate <small>all accepted → approval package, AwaitingApproval</small></div>
+        <div class="arrow">→<small>your call</small></div>
+        <div class="node done">4 · Complete <small><code>miah approve</code> — or reject/rework/amend</small></div>
+        <div class="arrow">↻<small>resume anywhere</small></div>
+        <div class="node attention">5 · Escalate <small>stuck → Attention, <code>miah resolve</code></small></div>
+      </div>
+      <p style="margin-top:var(--space-5);color:var(--muted);font-size:.95rem">The five stages loop through a <strong>six-phase state machine</strong> (below). If the machine dies mid-run — power cut, crash, whatever — the next <code>miah run</code> replays the journal and continues from the exact same byte-level state.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="use-title">
+      <h2 id="use-title">Use cases, walked through</h2>
+      <p class="lede">Five common situations and what Miah does in each.</p>
+      <div class="tabs" role="tablist" aria-label="Use cases">
+        <button class="tab-btn" role="tab" id="tab-1" aria-controls="panel-1" aria-selected="true">Admitting a plan</button>
+        <button class="tab-btn" role="tab" id="tab-2" aria-controls="panel-2" aria-selected="false">Driving the run</button>
+        <button class="tab-btn" role="tab" id="tab-3" aria-controls="panel-3" aria-selected="false">A unit is failing</button>
+        <button class="tab-btn" role="tab" id="tab-4" aria-controls="panel-4" aria-selected="false">The approval gate</button>
+        <button class="tab-btn" role="tab" id="tab-5" aria-controls="panel-5" aria-selected="false">The machine died</button>
+      </div>
+
+      <div class="tab-panel active" role="tabpanel" id="panel-1" aria-labelledby="tab-1">
+        <h3>“I have a plan file — get it running”</h3>
+        <p><span class="cmd">miah preflight plan.md</span> runs the pure checks: every requirement traceable to a unit, no cyclic dependencies, no cross-unit deliverable conflicts, tiers recognized, acceptance criteria present. If it fails, you get a list — nothing is admitted half-checked.</p>
+        <p><span class="cmd">miah start plan.md</span> goes further. It runs the <strong>substrate probe</strong>: a fail-closed capability check against the agent platform (Paseo). If a required capability is missing, admission <em>refuses</em> — Miah would rather not run than run dishonestly. On success it writes the run store: the immutable <code>plan-snapshot.v1.md</code>, <code>units.json</code>, a manifest carrying the <strong>admission-time config snapshot</strong> (R80 — a run keeps the config it was admitted with, even if you edit the file later), the lease, and the journal opened with <code>run_start</code> and an <code>Admitting</code> phase transition.</p>
+        <div class="note"><p><strong>Design underneath.</strong> Admission is the first trust boundary: the plan snapshot is immutable, the probe fails closed, and the run's config is fixed at admission — so a run in progress can never silently change its own rules mid-flight.</p></div>
+      </div>
+
+      <div class="tab-panel" role="tabpanel" id="panel-2" aria-labelledby="tab-2">
+        <h3>“Run it until it's done”</h3>
+        <p><span class="cmd">miah run</span> starts the driver loop. For each eligible unit, in dependency order:</p>
+        <div class="timeline">
+          <article><h3>Dispatch a builder</h3><p>An implementation agent (deepseek-v4-flash by default) works in an isolated worktree on its own branch, and commits its take. It is given the plan unit, its acceptance criteria, and the run's guardrails — nothing else.</p></article>
+          <article><h3>Harvest evidence</h3><p>When the builder terminates, Miah harvests artifacts — the diff, exit codes, test output — and chains them into a hash-linked <strong>custody chain</strong>. Prose from the agent is never evidence.</p></article>
+          <article><h3>Dispatch a verifier</h3><p>A <em>different</em> model family (glm-5.2 by default) audits the unit against the plan's per-unit G-criteria, re-running gates from disk — never from the builder's chat context. Verdicts are binary: PASS with evidence, or FAIL naming the missing criterion.</p></article>
+          <article><h3>Accept or rework</h3><p>PASS → the unit is accepted and its deliverables integrate into the canonical worktree. FAIL → the unit goes back for another take, up to bounded limits (3 takes / 2 rework cycles, configurable). No-progress detection (3 unchanged polls) and a dispatch deadline (15 min) keep a stuck unit from spinning forever.</p></article>
+        </div>
+        <div class="note"><p><strong>Design underneath.</strong> Cross-family verification hedges shared-training blind spots; calibration is the actual authority — a checker profile only clears the bar with ≥15 pre-labeled cases, &gt;14/15 agreement, ≤2 false blocks, zero false-pass floor. And everything is journaled: a verifier that dies mid-audit is re-run fresh from disk.</p></div>
+      </div>
+
+      <div class="tab-panel" role="tabpanel" id="panel-3" aria-labelledby="tab-3">
+        <h3>“A unit keeps failing”</h3>
+        <p>When a unit exhausts its takes or rework budget, or no-progress persists, Miah raises an escalation — a first-class journal event with a stable id (<code>esc-&lt;seq&gt;</code>), pauses the run, and moves the state machine to <strong>Attention</strong>. The driver stops dispatching; your move:</p>
+        <p><span class="cmd">miah status</span> shows the run phase and pending escalations. Then <span class="cmd">miah resolve &lt;esc-id&gt; --decision approve|rework|deny</span>:</p>
+        <div class="table-wrap" style="margin-top:var(--space-3)">
+          <table>
+            <thead><tr><th>Decision</th><th>What happens</th></tr></thead>
+            <tbody>
+              <tr><td><span class="tag green">approve</span></td><td>Operator authority accepts the escalated criterion: its gap is closed and the unit is marked accepted (integration still runs, per R89).</td></tr>
+              <tr><td><span class="tag blue">rework</span></td><td>The unit is durably marked for re-dispatch; the run resumes and sends it back to a builder.</td></tr>
+              <tr><td><span class="tag red">deny</span></td><td>Closes the escalation without changing unit state. If the blocking condition still holds, it re-raises on the next <code>miah run</code> — deny dismisses, it doesn't hide.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note"><p><strong>Design underneath.</strong> Bounded autonomy: two consecutive verifier FAILs or a broken dependency also stop the loop and escalate to you. The escalation journal trail (<code>escalation_raised</code> → <code>operator_decision</code> → <code>escalation_resolved</code>) is a complete, replayable record of every judgment call.</p></div>
+      </div>
+
+      <div class="tab-panel" role="tabpanel" id="panel-4" aria-labelledby="tab-4">
+        <h3>“Everything is accepted — now what?”</h3>
+        <p>When all units are accepted, Miah writes the <strong>approval package</strong>: per-unit evidence pointers, acceptance records, gap close reasons, usage totals, snapshot hash, and run duration. The run parks in <strong>AwaitingApproval</strong>. Your options:</p>
+        <div class="table-wrap" style="margin-top:var(--space-3)">
+          <table>
+            <thead><tr><th>Command</th><th>Effect</th></tr></thead>
+            <tbody>
+              <tr><td><span class="cmd">miah approve</span></td><td>Run → <strong>Complete</strong>.</td></tr>
+              <tr><td><span class="cmd">miah reject --rework U2,U5</span></td><td>Marks units for re-dispatch; the R67 resume re-opens the gate (<code>AwaitingApproval → Ready</code>) and the run continues — the marking is durable, so it survives restarts.</td></tr>
+              <tr><td><span class="cmd">miah reject --end</span></td><td>Terminal rejection.</td></tr>
+              <tr><td><span class="cmd">miah amend &lt;plan&gt;</span></td><td>Admits a new plan version; only affected units are re-dispatched. The config snapshot and amend trail are journaled.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note"><p><strong>Design underneath.</strong> The state machine is <em>state-aware</em>, not just a static transition table: <code>AwaitingApproval → Ready</code> is legal only when units are actually marked for rework (R67) — a lesson paid for by a real bug where the marking worked but the resume didn't.</p></div>
+      </div>
+
+      <div class="tab-panel" role="tabpanel" id="panel-5" aria-labelledby="tab-5">
+        <h3>“The machine died mid-run”</h3>
+        <p>Kill Miah at any moment — mid-dispatch, mid-append, mid-harvest. The next <span class="cmd">miah run</span>:</p>
+        <div class="timeline">
+          <article><h3>Acquire the lease</h3><p>The admission lease (<code>lease.lock</code>, heartbeat + TTL) is taken with stale-takeover rules: a dead holder's lease can be reclaimed, but a live one is never stolen.</p></article>
+          <article><h3>Replay the journal</h3><p>Every event since the last snapshot (taken every K=50 events) is replayed to reconstruct derived state — byte-identical to what a driver that never died would see.</p></article>
+          <article><h3>Reconcile in-flight work</h3><p>Dispatched intents without a recorded result are reconciled: the adapter is queried, terminated work is harvested, live work is polled, and nothing is double-dispatched (idempotency keys, R37).</p></article>
+          <article><h3>Continue</h3><p>The driver resumes exactly where the journal says it was. This is the <strong>kill drill</strong>: a verification suite that kills the process mid-run and asserts byte-identical reconstructed state — the plan marks it “non-negotiable”.</p></article>
+        </div>
+        <div class="note"><p><strong>Design underneath.</strong> Disk-first supervision: the journal is the source of truth, snapshots bound replay cost, and the lease arbitrates concurrent drivers. Your chat transcript with Miah is disposable — the state never lives only in a session.</p></div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="fsm-title">
+      <h2 id="fsm-title">The state machine at a glance</h2>
+      <p class="lede">Eight phases. The spine runs Admitting → Ready → Implementing ⇄ Reviewing → AwaitingApproval → Complete. Two pause states interrupt it (gold = waits for you), and Stopping is reachable from anywhere via <code>miah stop</code>.</p>
+      <div class="fsm" style="margin-top:var(--space-4)">
+        <div class="phase"><b>Admitting</b><small>preflight · probe · lease · run_start</small></div>
+        <div class="phase"><b>Ready</b><small>lease held, no work yet</small></div>
+        <div class="phase"><b>Implementing</b><small>builder dispatched</small></div>
+        <div class="phase"><b>Reviewing</b><small>verifier auditing evidence</small></div>
+        <div class="phase pause"><b>AwaitingApproval</b><small>approval package · your call</small></div>
+        <div class="phase pause"><b>Attention</b><small>escalation · your call</small></div>
+        <div class="phase"><b>Stopping</b><small>operator stop</small></div>
+        <div class="phase term"><b>Complete</b><small>terminal · or rejected</small></div>
+      </div>
+      <p style="margin-top:var(--space-4);color:var(--muted);font-size:.95rem">Every transition is a journaled <code>phase_transition</code> event, so the phase is always derivable from the durable record — never from memory.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="trust-title">
+      <h2 id="trust-title">What keeps the loop honest</h2>
+      <div class="grid">
+        <article class="card"><span class="tag blue">Evidence</span><h3>Custody chain</h3><p>Every harvested artifact is SHA-256 content-hashed and linked via <code>prev_hash</code> headers. A broken link is an evidence gap — a FAIL, not a footnote.</p></article>
+        <article class="card"><span class="tag blue">Gaps</span><h3>Problems can't vanish silently</h3><p>Gaps are first-class events (<code>gap_recorded</code> / <code>gap_closed</code>). An acceptance that supersedes open gaps must journal explicit close events first — or the approval package is incomplete.</p></article>
+        <article class="card"><span class="tag blue">Calibration</span><h3>Reviewers earn authority</h3><p>A verifier's verdict counts only after its profile clears the calibration bar (≥15 corpus, &gt;14/15 agreement, ≤2 false-blocks, zero false-pass). Cross-family contrast is a hedge; calibration is the authority.</p></article>
+        <article class="card"><span class="tag blue">Fail-closed</span><h3>Admission refuses, never fakes</h3><p>The substrate probe fails closed: missing agent capability → no run. Known platform gaps (per-agent max-duration, post-termination immutability) are honestly refused rather than papered over.</p></article>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="ref-title">
+      <h2 id="ref-title">Command reference</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Command</th><th>Does</th><th>Stage</th></tr></thead>
+          <tbody>
+            <tr><td><code>miah preflight &lt;plan&gt;</code></td><td>Pure plan checks — traceability, dependencies, tiers, criteria</td><td>Admit</td></tr>
+            <tr><td><code>miah start &lt;plan&gt;</code></td><td>Preflight + substrate probe + snapshot + lease + journal</td><td>Admit</td></tr>
+            <tr><td><code>miah run [--once]</code></td><td>Drive the loop (one step with <code>--once</code>)</td><td>Drive</td></tr>
+            <tr><td><code>miah status</code></td><td>Phase, units, escalations, approval package state</td><td>Observe</td></tr>
+            <tr><td><code>miah stop</code></td><td>Durable stop flag; run pauses and waits</td><td>Control</td></tr>
+            <tr><td><code>miah resolve &lt;esc&gt; --decision approve|rework|deny</code></td><td>Answer an escalation</td><td>Escalate</td></tr>
+            <tr><td><code>miah approve</code></td><td>Accept the approval package → Complete</td><td>Gate</td></tr>
+            <tr><td><code>miah reject --rework U2,U5 | --end</code></td><td>Re-dispatch units, or reject the run</td><td>Gate</td></tr>
+            <tr><td><code>miah amend &lt;plan&gt;</code></td><td>Admit a new plan version; affected units re-dispatch</td><td>Gate</td></tr>
+            <tr><td><code>miah list</code></td><td>List runs and their phases</td><td>Observe</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="where-title">
+      <h2 id="where-title">Where to go deeper</h2>
+      <div class="grid">
+        <article class="card"><h3>Architecture set</h3><p><code>docs/architecture/</code> — system overview, 26 design decisions, state-machine reference, data &amp; security, mechanism deep-dives, maintenance guide.</p></article>
+        <article class="card"><h3>Patterns</h3><p><code>docs/solutions/patterns/</code> — disk-first loops, kill drills, cross-family verification, FSM guards, gap discipline, and more.</p></article>
+        <article class="card"><h3>Plan &amp; audit</h3><p><code>docs/plans/2026-08-06-003-…plan.md</code> (R1–R90) and its audit file with the per-unit G-criteria.</p></article>
+        <article class="card"><h3>Vocabulary</h3><p><code>CONCEPTS.md</code> — run phases, approval package, kill drill, custody chain, config snapshot, and the rest of the shared terms.</p></article>
+      </div>
+    </section>
+
+    <footer>
+      Miah v1 · squash commit <code>d7eac30</code> (PR #1) · 340 unit tests + E2E kill drills · CI green · independent MiniMax-M3 review APPROVE ·
+      Self-contained HTML artifact · works offline
+    </footer>
+  </main>
+  <script>
+    "use strict";
+    const tabs = document.querySelectorAll(".tab-btn");
+    const panels = document.querySelectorAll(".tab-panel");
+    tabs.forEach((tab, i) => {
+      tab.addEventListener("click", () => {
+        tabs.forEach((t) => t.setAttribute("aria-selected", t === tab ? "true" : "false"));
+        panels.forEach((p) => p.classList.toggle("active", p.id === "panel-" + (i + 1)));
+      });
+    });
+  </script>
+</body>
+</html>
