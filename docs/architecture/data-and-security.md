@@ -37,7 +37,6 @@ Source: `src/run-store.ts:25-37` (`RunStoreLayout`), `src/run-store.ts:53-68` (`
 | `evidence/<unit>/<take>/<role>/` | harvested artifacts per attempt | `src/evidence.ts:350` |
 | `evidence/custody-chain.json` | per-run hash-chained custody sequence | `src/custody.ts:44-49`, `src/evidence.ts:459-480` |
 | `approval-package.json` | consolidated evidence summary at the gate | `src/driver.ts:258-312` |
-| `calibration/` | reserved (operator corpora live under the config base, not here) | `src/run-store.ts:75` |
 | `stop-requested.json` | durable stop flag `{stop_requested: true, requested_at}` | `src/driver.ts:55-83` |
 
 Run ids: `run-<planHash[:10]>-YYYYMMDDTHHMMSS` — deterministic for the same plan and admission time (`src/run-store.ts:43-50`).
@@ -90,7 +89,7 @@ Source: `src/types.ts:284-295` (`DerivedState`), `src/types.ts:240-277` (per-uni
 ```jsonc
 {
   "seq": 0,            // highest journal seq applied
-  "phase": "not-started",  // latest phase_transition.to
+  "phase": "Admitting",  // latest phase_transition.to; admission journals not-started -> Admitting (issue #3)
   "run_id": null,
   "plan_hash": null,
   "terminal": null,    // "complete" | "rejected" | null

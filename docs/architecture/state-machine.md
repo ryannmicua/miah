@@ -17,7 +17,7 @@ The eight phases are not all the same kind of thing. Six of them form the **forw
 
 The forward spine:
 
-- **Admitting** — the admission gate: preflight + substrate probe + lease acquisition + `run_start`. This phase is represented by the admission gate itself rather than a journaled `phase_transition`; the first journaled transition moves from the sentinel (`not-started`) or Admitting into `Ready` (`src/driver.ts:378-384`).
+- **Admitting** — the admission gate: preflight + substrate probe + lease acquisition + `run_start`. Admission journals `phase_transition: not-started → Admitting` (`src/admission.ts:203-208`, issue #3); the first `miah run` then journals `Admitting → Ready` (`src/driver.ts:378-384`).
 - **Ready** — lease held, units parsed, no work dispatched yet. Every fresh or resumed run opens from here.
 - **Implementing** — builders dispatched for eligible units. Entered on the first dispatch (`src/step.ts:478`).
 - **Reviewing** — a candidate unit's work was frozen and is being reviewed; entered when a terminated builder's evidence is harvested (`src/step.ts:550`).
