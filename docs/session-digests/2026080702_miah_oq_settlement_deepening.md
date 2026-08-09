@@ -27,7 +27,7 @@ Continuation of the Miah Phase 2 planning session (digest `2026080701`). The uni
 - Operator declined the Phase 5.4 handoff menu (ce-work / ce-doc-review / issue / Proof) — chose wrapup instead.
 
 ### Ended
-Plan at 649 lines with `deepened: 2026-08-07`, all 10 findings applied and verified, OQ1-OQ5 settled in the plan narrative (F8/F9 edits), operator declined the handoff menu. Uncommitted: the deepening delta.
+Plan at 649 lines with `deepened: 2026-08-07`, all 10 findings applied and verified, OQ1-OQ5 settled in the plan narrative (F8/F9 edits), operator declined the handoff menu. Uncommitted: the deepening delta. (Resolved after this session: delta committed `6e53fc8`; plan approved, Phase 3 advanced.)
 
 ## ARTIFACT
 
@@ -93,21 +93,21 @@ Plan at 649 lines with `deepened: 2026-08-07`, all 10 findings applied and verif
 
 ## OPEN_QUESTION
 
-### OQ1. When is the deepened plan committed and approved?
+### OQ1. When is the deepened plan committed and approved? (resolved 2026-08-07 — delta committed `6e53fc8`, plan approved, Phase 3 advanced)
 - **Progress**: base committed (`2a75c2c`); deepening delta (21+/17-) uncommitted; OQ1-OQ5 settled.
-- **Blocks**: Phase 3 advance (AGENTS.md rewrite); ce-doc-review was offered but not run; the R4/R5 admission blocker remains until Paseo ships per-agent `max-duration`.
+- **Blocks**: Phase 3 advance (AGENTS.md rewrite); ce-doc-review was offered but not run; the R4/R5 admission blocker remains until Paseo ships per-agent `max-duration`. (The R4/R5 blocker is still open — see digest `2026080801` OQ1.)
 
 ## NEXT_STEP
 
-### N1. Commit the deepening delta (someday — operator's call)
+### N1. Commit the deepening delta (done — committed `6e53fc8`)
 - Prompted by: wrapup; the delta is a coherent "deepening pass" unit (F1-F10 + index fix).
 - Suggested message: "docs: deepen Miah implementation plan after ce-plan confidence check".
 
-### N2. Optionally run ce-doc-review on the deepened plan before approval (soon, declined this session)
+### N2. Optionally run ce-doc-review on the deepened plan before approval (moot — plan approved 2026-08-07 without ce-doc-review; plan validation came via the deepening confidence check and the pre-U1 audit file `23fcfe2`)
 - Prompted by: Phase 5.4 handoff; operator declined.
 - Remains available before final approval.
 
-### N3. On operator approval: rewrite AGENTS.md to Phase 3 (soon, post-approval)
+### N3. On operator approval: rewrite AGENTS.md to Phase 3 (done — AGENTS.md advanced to Phase 3 for implementation, now Phase 4 — Operating)
 - Prompted by: AGENTS.md working rules.
 
 ## CONNECTIONS

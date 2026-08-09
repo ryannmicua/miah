@@ -4,16 +4,19 @@
 
 ## Status
 
-The product vision is written and approved (`VISION.md`). The project is in Phase 2 — Planning: turning the vision into an implementation-ready plan.
+Miah v1 is shipped: implemented per plan R1–R90 and merged via PR #1 (squash commit `d7eac30`). 340 unit tests plus the E2E suites (including kill drill v3) pass and CI is green; an independent MiniMax-M3 review returned APPROVE with all findings fixed.
 
 ## Getting started
 
-Run an agent from this directory and follow `AGENTS.md`. In the current phase, work focuses on planning: read `VISION.md` and `STRATEGY.md`, then develop the implementation plan with the operator. `AGENTS.md` rewrites itself as the project advances into Building and Operating phases.
+Install and build with `npm ci && npm run build`, then use the `miah` CLI: `preflight | start | run | status | stop | resolve | approve | reject | amend | list`. Live-daemon E2E tests require the Paseo daemon; on hosts without it they are gated on `paseoCliAvailable()` and skip rather than fail. Run an agent from this directory and follow `AGENTS.md`.
 
 ## Layout
 
 - `AGENTS.md` — phase-aware operating instructions; rewrites itself as the project advances
 - `VISION.md` — canonical product vision (approved)
 - `STRATEGY.md` — derived strategic framing and planning priorities
-- `docs/` — durable planning artifacts, research notes, and (future) implementation plans
+- `CONCEPTS.md` — shared domain vocabulary (knowledge store)
+- `src/` — CLI implementation (`miah`)
+- `test/` — unit + E2E suites, including the kill drill
+- `docs/` — durable artifacts: plans (`docs/plans/`), decisions, research, reviews (`docs/reviews/`), compound learnings (`docs/solutions/`), and session digests (`docs/session-digests/`)
 - `tmp/` — scratch space; committed empty, contents ignored

@@ -4,9 +4,9 @@ This file is phase-aware: it tells any agent how to work in this repository righ
 
 ## Current phase
 
-**Phase 2 — Planning**
+**Phase 4 — Operating**
 
-The approved vision defines Miah as a resumable plan supervisor that coordinates specialist agents to execute one immutable approved plan with independent testing, review, durable evidence, bounded autonomy, and operator approval gates.
+Miah v1 is shipped and verified on `main` (squash commit `d7eac30`, PR #1): a resumable plan supervisor that coordinates specialist agents to execute one immutable approved plan with independent testing, review, durable evidence, bounded autonomy, and operator approval gates. The product is live; treat every change as a change to a maintained system.
 
 ## The phases
 
@@ -17,20 +17,7 @@ The approved vision defines Miah as a resumable plan supervisor that coordinates
 | 3 | Building | Working product | Feature ships and is verified |
 | 4 | Operating | Maintained product | Continuous; no automatic advance |
 
-## Phase 2 instructions (current)
-
-- Read `VISION.md` first; it is the canonical product definition and source of truth for this phase. Then read `STRATEGY.md` for derived strategic framing and planning priorities. If they conflict, follow `VISION.md` and surface the drift to the operator.
-- Work with the operator to turn the vision into an implementation-ready plan. Ask about scope and sequencing; do not invent requirements.
-- Save the plan to `docs/plans/` using the unified-plan convention.
-- After the plan is approved, rewrite this file: set **Current phase** to **Phase 3 — Building**, summarize the plan, and install Phase 3 instructions.
-
-## Phase 3 instructions (to be installed on advancement)
-
-- Execute the approved plan sequentially, one step at a time, verifying each step before moving on.
-- Keep `VISION.md` and the plan in sync; surface drift to the operator rather than silently changing direction.
-- After a feature ships and is verified, rewrite this file: set **Current phase** to **Phase 4 — Operating**, and install Phase 4 instructions.
-
-## Phase 4 instructions (to be installed on advancement)
+## Phase 4 instructions (current)
 
 - The product is live. Treat every change as a change to a maintained system: verify, test, and document.
 - Keep `VISION.md` current; anything that changes the vision should be recorded there before implementation.
