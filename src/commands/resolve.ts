@@ -9,8 +9,10 @@
  * escalated criterion's gap and journals `acceptance_decision: accept` (the
  * operator's judgment is the authority for the human/calibrated-judge tier,
  * R47/R48). `rework` journals `rework_started` so the unit is dispatch-eligible
- * again. A run paused in Attention resumes via Attention -> Ready so the next
- * `miah run` re-dispatches (R66, F14).
+ * again. `deny` closes the escalation without changing unit state; a
+ * still-blocking condition re-raises on the next `miah run`. A run paused in
+ * Attention resumes via Attention -> Ready so the next `miah run` re-dispatches
+ * (R66, F14).
  */
 import { PaseoCliAdapter, type PaseoAdapter, type PaseoHandle } from "../adapter/paseo";
 import { commitIntegrationFiles, runIntegrationCheck } from "../acceptance";
