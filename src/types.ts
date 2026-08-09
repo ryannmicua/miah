@@ -200,6 +200,10 @@ export const JOURNAL_EVENT_TYPES = [
   "lease_acquired",
   "lease_renewed",
   "lease_released",
+  /**
+   * Declared for R35 conformance; state snapshots are file-based (R41/R71,
+   * snapshots/state-<seq>.json) and never journaled.
+   */
   "journal_snapshot",
   "dispatch_intent",
   "dispatch_created",
