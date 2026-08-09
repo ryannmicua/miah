@@ -15,7 +15,8 @@
  * When everything passes, admission writes the run store: the plan snapshot
  * (R23), `units.json` (R24), the manifest with the admission-time config
  * snapshot (R80) and probe verdicts, then acquires the lease and opens the
- * journal with a `run_start` event.
+ * journal with a `run_start` event and an Admitting phase transition (R35,
+ * KTD14).
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -183,7 +184,8 @@ function admitRunStore(
   };
   writeManifest(layout, manifest);
 
-  // Acquire the lease, then open the journal with run_start (R15, R35).
+  // Acquire the lease, then open the journal with run_start and the Admitting
+  // phase transition (R15, R35, KTD14).
   const acquired = store.lease.acquire(opts.holderId);
   if (!acquired.ok) {
     return {
@@ -201,6 +203,9 @@ function admitRunStore(
     };
   }
   store.append("run_start", { run_id: runId, plan_hash: snapshot.hash });
+  // Journal the Admitting phase (KTD14, R35/R42): admission opens the run in
+  // the plan's first phase, not the "not-started" sentinel.
+  store.append("phase_transition", { from: "not-started", to: "Admitting" });
 
   return {
     ok: true,

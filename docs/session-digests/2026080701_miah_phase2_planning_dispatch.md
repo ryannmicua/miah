@@ -25,7 +25,7 @@ Continued the Miah Brainstorm 1 orchestrator session (agent `be0f5e9f`, Claude O
 - **ce-plan not actually run**: The Planning session agent produced the unified plan (003) by imitation — it never loaded the ce-plan skill. Discovered via activity-log audit. User declined to remediate; chose wrapup instead.
 
 ### Ended
-Phase 2 is at its exit condition: unified implementation plan `docs/plans/2026-08-06-003-miah-implementation-plan.md` (003) written but uncommitted and unapproved, with 5 operator questions (OQ1-OQ5) pending. Worktree/branch cleanup completed. Session wrapped up with the 003 plan awaiting operator review.
+Phase 2 is at its exit condition: unified implementation plan `docs/plans/2026-08-06-003-miah-implementation-plan.md` (003) written but uncommitted and unapproved, with 5 operator questions (OQ1-OQ5) pending. Worktree/branch cleanup completed. Session wrapped up with the 003 plan awaiting operator review. (Resolved after this session: plan committed `2a75c2c` and deepened `6e53fc8`; OQ1-OQ5 settled 2026-08-07 — see digest `2026080702`.)
 
 ## ARTIFACT
 
@@ -44,7 +44,7 @@ Phase 2 is at its exit condition: unified implementation plan `docs/plans/2026-0
 - **Quality**: adversarial pass ran on a FRESH independent thinker subagent (deepseek-v4-pro) — the anti-sycophancy skill was installed by then, unlike Brainstorm 1's environment.
 
 ### A4. Unified implementation plan (003)
-- **Path**: `docs/plans/2026-08-06-003-miah-implementation-plan.md` (UNCOMMITTED, UNREVIEWED)
+- **Path**: `docs/plans/2026-08-06-003-miah-implementation-plan.md` (UNCOMMITTED, UNREVIEWED as of this session; later committed `2a75c2c`, deepened `6e53fc8`)
 - **Contents**: 645 lines, R1-R90 (R63-R90 new for D6/D7/D8), 18 KTDs, 10 implementation units (U1-U10), verification contract, definition of done. TS/Node CLI; Windows 10 + Git Bash portability; substrate probe honestly reports absent; MCP injection fails closed (operator disables global injection as workaround); env secret-scrubbing documented residual risk; kill drill as first-class milestone (U3→U5→U10).
 - **Caveat**: produced WITHOUT the ce-plan skill (see DECISION D5). Content coherent and requirements-complete per this session's verification read, but the ce-plan workflow's confidence check, ce-doc-review, and handoff menu were never run.
 
@@ -123,27 +123,27 @@ Phase 2 is at its exit condition: unified implementation plan `docs/plans/2026-0
 - **Progress**: Feasibility verified (schedule expiry precedent); Paseo is at v0.3.0-beta.2, no agent-side feature. Admission fails closed until it ships.
 - **Blocks**: U4 (substrate probe) and U10 (full E2E admission) of the 003 plan; the R4/R5 blocker closure.
 
-### OQ2. Does v1 supervise `execution: knowledge-work` plans?
+### OQ2. Does v1 supervise `execution: knowledge-work` plans? (resolved 2026-08-07 — v1 is `execution: code` only)
 - **Progress**: Recorded assumption (D1/D2 A10): v1 is `execution: code` only. Machinery is code-shaped (diffs, worktrees, commits).
 - **Blocks**: Scope of 003 plan's R22.
 
-### OQ3. Operator questions OQ1-OQ5 of the 003 plan (language, knowledge-work, MCP injection, budget defaults, notifications)
+### OQ3. Operator questions OQ1-OQ5 of the 003 plan (language, knowledge-work, MCP injection, budget defaults, notifications) (resolved 2026-08-07 — all settled with recommended answers)
 - **Progress**: All five have recommended answers in the plan (TS/Node; code-only; fail-closed + disable global injection; 15m/3/2/1/3polls; CLI-first no push).
-- **Blocks**: Plan approval → AGENTS.md Phase 3 rewrite.
+- **Blocks**: Plan approval → AGENTS.md Phase 3 rewrite. (Resolved — plan approved; AGENTS.md advanced to Phase 3, now Phase 4 — Operating.)
 
 ## NEXT_STEP
 
-### N1. Operator reviews 003 plan and answers OQ1-OQ5 (soon — blocking Phase 3)
+### N1. Operator reviews 003 plan and answers OQ1-OQ5 (done 2026-08-07 — OQ1-OQ5 settled with recommended answers; plan approved, Phase 3 advanced)
 - Prompted by: Planning session completion; Phase 2 exit condition reached.
 - Decision on: language, knowledge-work scope, MCP injection strategy, budget defaults, notifications.
 
-### N2. Decide ce-plan remediation for 003 (soon, currently declined)
+### N2. Decide ce-plan remediation for 003 (done 2026-08-07 — ce-plan confidence check run in the deepening pass; see digest `2026080702`)
 - Prompted by: D5 discovery that ce-plan never ran. Options remain: confidence check + ce-doc-review + handoff, or accept-as-is, or re-dispatch with explicit skill loading.
 
-### N3. Commit 003 plan and push local commits (someday — per operator standing rule, no auto-commit/push)
+### N3. Commit 003 plan and push local commits (done — plan committed `2a75c2c`/`6e53fc8`; history superseded by the PR #1 squash `d7eac30`)
 - State: local main `c0349f6` (002) ahead of origin/main by 1; origin/main at `6614d0d` (001 + decision doc pushed externally). 003 untracked.
 
-### N4. On plan approval: rewrite AGENTS.md to Phase 3 and update README (soon, post-approval)
+### N4. On plan approval: rewrite AGENTS.md to Phase 3 and update README (done — AGENTS.md advanced to Phase 3 for implementation, now Phase 4 — Operating; README aligned)
 - Prompted by: AGENTS.md working rules — rewrite only when the operator approves the phase advance.
 
 ## CONNECTIONS

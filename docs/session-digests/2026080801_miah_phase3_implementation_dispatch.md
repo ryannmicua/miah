@@ -26,13 +26,13 @@ Phase 2 had landed an approved, deepened implementation plan (`docs/plans/2026-0
 - **Simplify-then-review-then-fix discipline held end to end.** A behavior-preserving simplify pass (`0f4086b`, +128/-192 on 14 files) ran *before* the review so the reviewer saw a consolidated diff; the review was report-only on a model family not involved in the build (MiniMax-M3) and dispatched three parallel sub-agents on the riskiest surface; findings were severity-calibrated (0 Critical, 0 Major, 5 Minor + 1 CI-process, 4 Nit); a fix agent landed one commit per finding (`f727b0c`–`0f44f21`) and added test coverage for the two gaps the review surfaced. (`simplify-before-third-party-code-review` pattern.)
 
 ### Ended
-The implementation branch `feat/miah-implementation` sits at `0f44f21` (26 commits, 23,592 insertions across 102 files, 335 unit tests + 4 E2E suites green, kill-drill v1/v2/v3 passing). A pre-PR final review (`docs/reviews/2026-08-08-final-code-review.md`) returned **APPROVE — recommend merging the PR**. A compounding pass (`ses_01e1b4516ffeSxpEMxxR4PNIQc`) staged 7 cross-project pattern docs + `CONCEPTS.md` on main (untracked, pending the orchestrator's commit). The Paseo per-agent `max-duration` feature ask (R4/R5), post-termination immutability (R46), and per-agent MCP scoping (R21) remain open — honestly fail-closed, honestly deferred.
+The implementation branch `feat/miah-implementation` sits at `0f44f21` (26 commits, 23,592 insertions across 102 files, 335 unit tests + 4 E2E suites green, kill-drill v1/v2/v3 passing). A pre-PR final review (`docs/reviews/2026-08-08-final-code-review.md`) returned **APPROVE — recommend merging the PR**. A compounding pass (`ses_01e1b4516ffeSxpEMxxR4PNIQc`) staged 7 cross-project pattern docs + `CONCEPTS.md` on main (untracked, pending the orchestrator's commit). The Paseo per-agent `max-duration` feature ask (R4/R5), post-termination immutability (R46), and per-agent MCP scoping (R21) remain open — honestly fail-closed, honestly deferred. (Resolved after this session: branch merged 2026-08-09 via PR #1 as squash `d7eac30` and deleted; compound artifacts committed `3feca93`; review-fix trail landed with the merge.)
 
 ## ARTIFACT
 
-### A1. Implementation branch `feat/miah-implementation` (worktree 29gy4n1g, HEAD `0f44f21`)
+### A1. Implementation branch `feat/miah-implementation` (worktree 29gy4n1g, HEAD `0f44f21`; merged 2026-08-09 via PR #1 as squash `d7eac30`, branch deleted)
 - **Layout**: TS/Node.js CLI; `package.json` bin `miah`; `src/` modules + `test/` (unit + e2e) + `test/fixtures/`. 23,592 +/0 net across 102 files (at simplify-pass HEAD `0f4086b`); 9 review-fix commits land after it to `0f44f21`.
-- **Commit map (feat → review-fix), 2026-08-07…08** — `git -C miah-implementation log --oneline`:
+- **Commit map (feat → review-fix), 2026-08-07…08** — `git -C miah-implementation log --oneline`. All SHAs below are pre-squash feature-branch commits (PR #1); the shipped product is the squash commit `d7eac30` on main. Original commits are findable in PR #1's commit list:
 
   | commit | tag | what | session |
   |---|---|---|---|
@@ -65,7 +65,7 @@ The implementation branch `feat/miah-implementation` sits at `0f44f21` (26 commi
   | `48fc830` | docs(review) | final code review | `ses_01ed1e40effenjSowv2O3OyIom` |
 
 - **Session ledger (implementation phase, ordered by `time_created`):** orchestrator `ses_02662f8f1ffeakPYZp0mv72n3k` (paseo-orchestrator / deepseek-v4-flash max) spans the whole phase. Per-unit pairs run on the implementation worktree — builder on `deepseek-v4-flash`, verifier/auditor on `glm-5.2`, dispatched fresh (independent context; reads disk). Fix agents: `ses_0255dc983ff…` (scratch hygiene), `ses_025502ecdff…` (lease handoff), `ses_01effaed5ff…` (post-completion hardening), `ses_01ee24b0dff…` (simplify + 3 general sub-agents), `ses_01e57d6f7ff…` (review fixes). Third-party review: `ses_01ed1e40eff…` (MiniMax-M3) + 3 sub-agents (2 explore + 1 thinker). Pattern-doc sessions on main: `ses_025d3a368ff…` (disk-first), `ses_0253f9040ff…` (attach-workspace). Compounding: `ses_01e1b4516ff…` (staged the 7 patterns + CONCEPTS.md).
-- **Caveat**: the AGENTS.md working-rules file observed in the main checkout still lists **Phase 2 — Planning** as the current phase (the Phase-3 rewrite had not landed in main when this digest was written). The implementation branch is the Phase-3 product; the operator owns the phase-advance rewrite.
+- **Caveat**: the AGENTS.md working-rules file observed in the main checkout still lists **Phase 2 — Planning** as the current phase (the Phase-3 rewrite had not landed in main when this digest was written). The implementation branch is the Phase-3 product; the operator owns the phase-advance rewrite. (Resolved 2026-08-09 — AGENTS.md advanced to **Phase 4 — Operating**.)
 
 ### A2. Plan audit file — `…003….audit.md` (committed `23fcfe2`)
 - **Contents**: 296 lines. Global exit bar G0.1–G0.11 (every R1-R90 traceable to a unit; `npm run build`; `npm test`; `miah preflight`; `miah start` fail-closed against live daemon; kill drill non-negotiable; deadline-past-death; config thresholds snapshotted at admission; Windows/portability; abandoned-code-free; README only after approval). Per-unit criteria U1.1…U10.12, each citing its plan source (every criterion is *derived*, none invented). Binary verdicts (`PASS`/`FAIL`); freeze rule forbids builders from touching carried-forward R1-R62; sequencing check forbids auditing a unit whose `depends-on` is not yet accepted. Kill-drill milestones block (v1@U3, v2@U5, v3@U10). Honest-limits block: max-duration (R4/R5), immutability (R46), MCP scoping (R21) — never a builder FAIL.
@@ -78,7 +78,7 @@ The implementation branch `feat/miah-implementation` sits at `0f44f21` (26 commi
 - **Test-suite strengths noted**: real-CLI E2E against the live daemon; kill-drill rigor (deterministic crash-tail injection + independent-artifact byte-identical assertion); calibration-bar boundaries; boundary preflight; lease invariants; correct mock boundaries (no `any`, no wrong-layer mocks).
 - **Surfaced gaps (not blocking)**: open-gap-surviving-to-`run_terminal` untested (now closed by M1 fix test); lease-held paths in `resolve`/`approve`/`reject`/`amend` untested (only `stop`/`run` cover it).
 
-### A4. Compound knowledge (7 pattern docs + `CONCEPTS.md`, untracked on main)
+### A4. Compound knowledge (7 pattern docs + `CONCEPTS.md`, untracked on main as of this session; committed `3feca93`)
 - **Staged by** compounding session `ses_01e1b4516ffeSxpEMxxR4PNIQc` after the review fixes. All are cross-project knowledge (the operator synthesizes into other projects). The 7 untracked artifacts are `CONCEPTS.md` plus six new pattern docs:
   1. `docs/solutions/patterns/simplify-before-third-party-code-review.md` — consolidate → independent review → severity-calibrated findings → one commit per finding.
   2. `docs/solutions/patterns/cross-family-verifier-audit-g-criteria.md` — builder on one family, independent verifier on another; convert plan exit bars into a checkable audit file.
@@ -88,7 +88,7 @@ The implementation branch `feat/miah-implementation` sits at `0f44f21` (26 commi
   6. `docs/solutions/patterns/adapter-default-workspace-config-field.md` — wire `dispatch.default_workspace` into the adapter; read from the admission-time config snapshot, never the live file.
 - **Already-tracked patterns this phase validated** (committed on `main` earlier, cited below as `instance_of`): `disk-first-paseo-loop.md` (the U3 death), `attach-workspace-to-existing-project.md` (the 19-orphan incident), `paseo-per-agent-hard-bound-verification.md` (R4/R5 framing), `feature-gated-milestone-testability-seam.md` (the fake probe).
 - **`CONCEPTS.md`** — repo domain vocabulary seeded from this phase: run-phase FSM, AwaitingApproval, approval package, config snapshot, kill drill, G-criteria, cross-family verifier, gap, custody chain, `dispatch.default_workspace`. Each concept links to its pattern doc. Glossary only, not a spec.
-- **Caveat**: all 7 are untracked (`git status` on main lists them as `??`); the orchestrator commits after this step.
+- **Caveat**: all 7 are untracked (`git status` on main lists them as `??`); the orchestrator commits after this step. (Resolved — committed `3feca93`.)
 
 ## DECISION
 
@@ -279,26 +279,26 @@ Universal for any adapter dispatching Paseo agents. Put the workspace id in the 
 - **Progress**: absent in v0.3.0-beta.2; the operator's workaround is to disable `daemon.mcp.injectIntoAgents` globally during Miah runs; fail-closed admission gate is tested.
 - **Blocks**: per-dispatch scoping without the operator workaround.
 
-### OQ4. Should the AGENTS.md on main be advanced to Phase 3 (now) / Phase 4 (after the PR merges)?
+### OQ4. Should the AGENTS.md on main be advanced to Phase 3 (now) / Phase 4 (after the PR merges)? (resolved 2026-08-09 — AGENTS.md advanced to **Phase 4 — Operating** after the merge)
 - **Progress**: the main checkout's AGENTS.md still reads **Phase 2 — Planning** as the current phase; the implementation branch is the Phase-3 product. The operator owns the rewrite-on-phase-advance (AGENTS.md working rules).
-- **Blocks**: surface this drift to the operator rather than silently editing the file.
+- **Blocks**: surface this drift to the operator rather than silently editing the file. (Resolved — drift surfaced; AGENTS.md rewritten on the operator-approved phase advance.)
 
-### OQ5. When is the implementation branch pushed and the PR opened?
+### OQ5. When is the implementation branch pushed and the PR opened? (resolved 2026-08-09 — PR #1 merged as squash commit `d7eac30`; feature branch deleted)
 - **Progress**: 26 local commits on `feat/miah-implementation`; `git status` shows the branch ahead of origin; the review noted 5 unpushed commits at simplify-pass HEAD (the rest follow).
-- **Blocks**: external merge; the operator's standing rule is no auto-push.
+- **Blocks**: external merge; the operator's standing rule is no auto-push. (Resolved — merged; branch deleted.)
 
 ## NEXT_STEP
 
-### N1. Commit the 7 untracked compound artifacts + CONCEPTS.md (now — orchestrator commits after this step)
+### N1. Commit the 7 untracked compound artifacts + CONCEPTS.md (done — committed `3feca93`)
 Prompted by: compounding session `ses_01e1b4516ffeSxpEMxxR4PNIQc` staged them; the orchestrator owns the commit, per the dispatch contract.
 
-### N2. Operator decides on push + PR for `feat/miah-implementation` (soon — operator's call)
+### N2. Operator decides on push + PR for `feat/miah-implementation` (done 2026-08-09 — PR #1 merged as `d7eac30`; branch deleted)
 Prompted by: review APPROVED; the branch carries 26 commits + the review/fix trail; `dist/index.js` is not in the diff and must be built before install/publish.
 
 ### N3. When Paseo ships per-agent `max-duration`: drop the fake probe and re-run U10 against the live daemon (someday)
 Prompted by: D5/OQ1; honest-limits section of the plan. Same instruction for R46/OQ2 and R21/OQ3.
 
-### N4. Operator surfaces the AGENTS.md phase drift and rewrites it on phase advance (soon)
+### N4. Operator surfaces the AGENTS.md phase drift and rewrites it on phase advance (done 2026-08-09 — AGENTS.md now **Phase 4 — Operating**)
 Prompted by: OQ4; AGENTS.md working rules — rewrite only when the operator approves the phase advance.
 
 ### N5. Cover the remaining review-surfaced test gaps if desired (someday)
@@ -324,6 +324,6 @@ Prompted by: review §4 gaps 2 (no-progress across session boundary — now lock
 - OQ1 —[depends_on]→ I5 ; OQ4 —[contradicts]→ the main checkout's current AGENTS.md text
 
 ## Trail Updates
-- **miah-implementation**: Phase 3 implementation complete on `feat/miah-implementation` @ `0f44f21` — 10 units built, paired each builder with a cross-family verifier (cross-family-audit-G-criteria), kill drill passing at v1/v2/v3, MiniMax-M3 pre-PR review APPROVED, all review findings landed as atomic fix commits. Branch unpushed; PR is the operator's call. Honest limits (max-duration R4/R5, immutability R46, MCP scoping R21) remain open and fail-closed.
+- **miah-implementation**: Phase 3 implementation complete on `feat/miah-implementation` @ `0f44f21` — 10 units built, paired each builder with a cross-family verifier (cross-family-audit-G-criteria), kill drill passing at v1/v2/v3, MiniMax-M3 pre-PR review APPROVED, all review findings landed as atomic fix commits. Branch unpushed; PR is the operator's call. (Resolved 2026-08-09 — PR #1 merged as squash `d7eac30`; branch deleted.) Honest limits (max-duration R4/R5, immutability R46, MCP scoping R21) remain open and fail-closed.
 - **paseo-orchestration**: disk-first commit-per-step validated by a real builder death; adapter-level `dispatch.default_workspace` added after the 19-orphan-project incident; resume-with-narrowed-instructions re-applied at the loop scale; dispatch session (`ses_02662f8f1ffeakPYZp0mv72n3k`) spans the full phase.
 - **agent-orchestration**: cross-family builder/verifier + third-family review as the cheapest hedge against shared-training blind spots; an injected probe seam decouples pipeline testing from substrate-feature readiness; simplify-then-review-then-fix is the discipline that keeps independent review honest and fix trails auditable.

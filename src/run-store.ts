@@ -4,7 +4,7 @@
  * The out-of-tree, owner-only run directory that specialists can never write
  * to (R32). Layout per R31-R32: `manifest.json`, `plan-snapshot.<version>.md`,
  * `units.json`, `journal.jsonl`, `lease.lock`, `snapshots/`, `evidence/`,
- * `approval-package.json`, `calibration/`. The base path is injectable so tests
+ * `approval-package.json`. The base path is injectable so tests
  * (and the CLI under `MIAH_CONFIG_HOME`) never touch a real home directory.
  *
  * `RunStore` is the thin U3 facade wiring journal + lease + snapshots together:
@@ -33,7 +33,6 @@ export interface RunStoreLayout {
   snapshotsDir: string;
   evidenceDir: string;
   approvalPackagePath: string;
-  calibrationDir: string;
 }
 
 /**
@@ -63,7 +62,6 @@ export function resolveRunLayout(basePath: string, runId: string): RunStoreLayou
     snapshotsDir: path.join(root, "snapshots"),
     evidenceDir: path.join(root, "evidence"),
     approvalPackagePath: path.join(root, "approval-package.json"),
-    calibrationDir: path.join(root, "calibration"),
   };
 }
 
@@ -72,7 +70,6 @@ export function createRunStoreDirs(layout: RunStoreLayout): void {
   fs.mkdirSync(layout.root, { recursive: true });
   fs.mkdirSync(layout.snapshotsDir, { recursive: true });
   fs.mkdirSync(layout.evidenceDir, { recursive: true });
-  fs.mkdirSync(layout.calibrationDir, { recursive: true });
 }
 
 /** Run ids under a base path, ascending. */
