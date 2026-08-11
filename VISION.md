@@ -21,12 +21,12 @@ Miah supervises the execution of an approved plan. It coordinates specialist age
 A run proceeds as follows:
 
 1. **Validate the plan.** Miah reviews the approved plan for executability. If the plan cannot be executed, Miah stops and returns its findings without changing the plan.
-2. **Prepare execution.** A planner derives sequencing, dependencies, and bounded implementation units. It identifies work that can safely run in parallel.
+2. **Prepare execution.** A planner derives sequencing, dependencies, and bounded implementation units. It identifies work that can safely run in parallel and generates each unit's verification contract — the frozen checks the work will be graded against — before any implementation begins.
 3. **Protect approved intent.** Derived execution details may clarify how the plan will be carried out, but changes to scope, requirements, or acceptance criteria require operator approval.
 4. **Delegate implementation.** Builders execute scoped implementation units and continuously leave durable evidence of their work.
 5. **Test independently.** Testers evaluate completed work independently from the builders.
-6. **Review independently.** Reviewers or auditors assess the output, evidence, and conformity with the approved plan.
-7. **Accept or rework.** Miah evaluates the available evidence and decides whether each unit is acceptable. It may direct bounded rework using planners and builders.
+6. **Grade independently.** The verifier assesses the output, evidence, and conformity with the approved plan, and grades every acceptance criterion. When a criterion warrants human judgment, the operator grades it.
+7. **Accept or rework.** Miah applies the grades as a decidable acceptance predicate — it records evidence and enforces the predicate but makes no grading judgment itself. It may direct bounded rework using planners and builders.
 8. **Escalate without blocking unrelated work.** When a decision exceeds Miah's authority, it pauses the affected implementation unit and any work that depends on it. Independent units continue when they can proceed safely. Miah pauses the entire run only when the issue affects the plan as a whole or no executable work remains.
 9. **Request final approval.** Miah presents a consolidated evidence package to the operator. If the operator rejects the result, Miah asks whether to end the run or begin bounded rework.
 
@@ -52,7 +52,7 @@ Miah may autonomously handle routine sequencing decisions, bounded rework, and o
 
 - **Executable:** Work begins only when the approved plan can be carried out without inventing missing requirements.
 - **Faithful:** Execution remains within the approved scope, requirements, and acceptance criteria.
-- **Evidence-based:** Claims of completion are supported by implementation records, independent tests, and review findings.
+- **Evidence-based:** Claims of completion are supported by implementation records, independent tests, and verifier grades.
 - **Observable:** The operator can see what is happening, where the run stands, and what resources have been used.
 - **Auditable:** Decisions, handoffs, outputs, failures, and rework leave a durable trace.
 - **Resumable:** A crash or interrupted session does not lose completed work or workflow state.
@@ -65,7 +65,7 @@ Miah may autonomously handle routine sequencing decisions, bounded rework, and o
 For the first version, Miah is not:
 
 - A tool for exploring ideas or authoring the source plan.
-- An implementation, testing, or review agent.
+- An implementation, testing, or grading agent.
 - Authorized to change approved scope, requirements, or acceptance criteria.
 - A general-purpose multi-project or multi-run orchestration platform.
 - A black box that performs unrecorded work or silently accepts failures.
@@ -76,6 +76,6 @@ For the first version, Miah is not:
 - Every run is locked to an immutable snapshot of that plan.
 - Run history is recorded in an append-only journal.
 - Workflow state, evidence, statuses, and handoffs are durable and filesystem-based.
-- Builders, testers, and reviewers have distinct responsibilities.
-- Testing and review are independent of implementation.
+- Builders, testers, and verifiers have distinct responsibilities.
+- Testing and grading are independent of implementation.
 - Exact cost, time, retry, and severity thresholds are defined during implementation planning, not improvised during a run.

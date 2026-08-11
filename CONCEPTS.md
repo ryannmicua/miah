@@ -20,6 +20,10 @@
 
 **Cross-family verifier** — A checker dispatched on a different model family than the builder (e.g. builder on one family's flash model, tester on another vendor's model). Cross-family contrast is a hedge against shared-training blind spots, not the authority — calibration is the authority (R20). The builder's self-report is an input, not a fact.
 
+**Verifier** — The specialist role that grades every acceptance criterion — deterministic and judgment — against the harvested evidence. Deterministic criteria are certified from the mechanical contract results (no calibration authority needed); judgment grades carry authority only when the verifier's profile clears the calibration bar. The operator grades criteria declared `human` tier or flagged by the verifier (VISION steps 5-7; `docs/plans/2026-08-09-001-feat-independent-verifier-role-plan.md`). Merged the former reviewer role; Miah runs the checks (sensor) but never grades.
+
+**Verification contract** — The frozen per-unit checks a unit's work is graded against: drafted by the planner at plan-prep, operator-approved with the plan, riding in the immutable snapshot. A unit without one fails admission; changing one mid-run is a scope change requiring operator approval (VISION step 2).
+
 ## Gaps and evidence
 
 **Gap** — A first-class typed journal event recording a problem on a (unit, criterion) pair. Opened by `gap_recorded(unit, criterion, reason)`; closed by `gap_closed(unit, criterion, close_reason)`. Every criterion has a pass at or above its declared tier **with no open gap** on the unit for the acceptance predicate to hold. R50: "a problem cannot disappear silently" — an accept/override that supersedes open gaps must journal `gap_closed` events with `close_reason` before the superseding event (see `docs/solutions/patterns/explicit-gap-close-before-supersede.md`).

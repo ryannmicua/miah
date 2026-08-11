@@ -1,6 +1,6 @@
 ---
 name: Miah
-last_updated: 2026-08-05
+last_updated: 2026-08-09
 ---
 
 # Miah Strategy
@@ -15,7 +15,7 @@ Operators directing multiple specialist agents cannot keep up with the supervisi
 
 Miah wins by maximizing trustworthy execution within an operator-defined effort ceiling. It narrowly supervises one immutable approved-plan snapshot through role-separated agents, durable evidence, and explicit authority gates rather than becoming another implementation agent or general-purpose orchestrator.
 
-Specialist-agent claims are evidence inputs, not facts. Trust rests on independent testing or review and directly verifiable artifacts preserved in the run record, not on an agent's assertion alone.
+Specialist-agent claims are evidence inputs, not facts. Trust rests on independent testing, verifier grading of output and evidence against every acceptance criterion, and directly verifiable artifacts preserved in the run record, not on an agent's assertion alone.
 
 ## Who it's for
 
@@ -26,7 +26,7 @@ Specialist-agent claims are evidence inputs, not facts. Trust rests on independe
 - **First-pass approval rate** - The share of completed runs the operator accepts without sending the whole plan back for rework; measured from final approval decisions in the run journal.
 - **Operator effort compliance** - The share of runs completed without exceeding the operator-defined effort ceiling; measured from approval and escalation interactions together with the run's configured limits.
 - **Plan drift rate** - The share of implementation units that attempt or exhibit unauthorized changes to scope, requirements, or acceptance criteria; measured from escalations and review findings in the run journal.
-- **Corroborated proof rate** - The share of consequential completion claims backed by independent test or review results, or directly verifiable artifacts, rather than an agent's recorded assertion alone; measured from run evidence.
+- **Corroborated proof rate** - The share of consequential completion claims backed by independent test results, verifier grades, or directly verifiable artifacts, rather than an agent's recorded assertion alone; measured from run evidence.
 
 ## Tracks
 
@@ -44,7 +44,7 @@ _Why it serves the approach:_ It makes supervised work resumable and prevents pr
 
 ### Independent assurance
 
-Keep building, testing, and review responsibilities separate, and treat every specialist-agent claim as untrusted until corroborated or directly verified.
+Keep building, testing, and grading responsibilities separate, with verification contracts generated and frozen before implementation begins, and treat every specialist-agent claim as untrusted until corroborated or directly verified.
 
 _Why it serves the approach:_ It prevents role assignment, journal presence, or implementation claims from being mistaken for proof of correctness.
 
@@ -57,7 +57,7 @@ _Why it serves the approach:_ It preserves operator authority without allowing s
 ## Not working on
 
 - Exploring ideas or authoring the source plan.
-- Performing implementation, testing, or review work itself.
+- Performing implementation, testing, or grading work itself.
 - Becoming a general-purpose multi-project or multi-run orchestration platform.
 
 ## Marketing
