@@ -130,8 +130,8 @@ describe("e2e full-run", () => {
       let report = statusReport(opts, runId);
       expect(report.units.find((u) => u.id === "U1")?.status).toBe("not_started");
 
-      // Drive U1 to acceptance (deterministic criteria pass on the builder's
-      // work + the verification commands; no reviewer needed).
+      // Drive U1 to acceptance (deterministic criteria: the verifier certifies
+      // the frozen candidate's mechanical evidence — no operator needed).
       await until(opts, runId, (s) => s.units.U1?.status === "accepted", "U1 accepted");
 
       // Checkpoint 2: U1 accepted, U2 not yet accepted. (U2 may already be
@@ -149,8 +149,10 @@ describe("e2e full-run", () => {
         eventsAfterU1.filter((e) => e.type === "evidence_harvested" && e.unit_id === "U1").length,
       ).toBeGreaterThan(0);
 
-      // Drive U2: the calibrated-judge criterion cannot pass with empty corpora
-      // (KTD10), so the run pauses in Attention with an escalation.
+      // Drive U2: the verifier grades its calibrated-judge criterion, but the
+      // empty default corpora (KTD10) mean no profile clears the calibration
+      // bar — the verdict stays ungraded and the run pauses in Attention with
+      // a no-checker-profile escalation (R48/R20, KTD6).
       await until(
         opts,
         runId,
@@ -164,8 +166,10 @@ describe("e2e full-run", () => {
       expect(report.phase).toBe("Attention");
       expect(report.escalations.length).toBeGreaterThan(0);
       expect(report.escalations[0].unit_id).toBe("U2");
-      expect(report.escalations[0].reason).toContain("max rework cycles exceeded");
-      expect(report.units.find((u) => u.id === "U2")?.status).toBe("not_started");
+      expect(report.escalations[0].trigger).toBe("no-checker-profile-clears-calibration-bar");
+      expect(["awaiting_verification", "verifying"]).toContain(
+        report.units.find((u) => u.id === "U2")?.status,
+      );
 
       // The calibration gate is the reason: U2's acceptance decision records the
       // calibrated-judge criterion as not passing.
@@ -183,6 +187,8 @@ describe("e2e full-run", () => {
       ).toBe(true);
 
       // Operator resolves the escalation with `miah resolve --decision approve`.
+      // The approve records an operator PASS grade for U2's calibrated
+      // criterion (KTD6/KTD7); the predicate re-evaluation accepts U2.
       const escalation = openEscalations(opts, runId)[0];
       const resolveCode = await resolveApprove(opts, runId, escalation.escalation_id);
       expect(resolveCode).toBe(0);

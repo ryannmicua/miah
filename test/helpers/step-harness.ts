@@ -8,7 +8,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { PaseoInspectResult } from "../../src/adapter/paseo";
-import { writeEnvelope } from "../../src/envelope";
+import { writeEnvelope, type VerifierEnvelope } from "../../src/envelope";
+import { readPackageManifest } from "../../src/verifier";
 import {
   allUnitsAccepted,
   createStepRuntime,
@@ -29,14 +30,39 @@ import {
 import { ScriptedAdapter } from "./scripted-adapter";
 
 /** A deterministic-tier acceptance criterion (passes on verification all-pass). */
-export const DET_CRITERION = { text: "behaves per contract", tier: "deterministic" };
+export const DET_CRITERION = { id: "U1.AC1", text: "behaves per contract", tier: "deterministic" };
 
-/** Build a PlanUnit with sane defaults. */
+/**
+ * A default one-command verification contract mapping every acceptance
+ * criterion to `U<num>.CMD1` = `npm test` (KTD1). Harness units carry this so
+ * contract diffs stay neutral in amend tests and the parsed contract feeds
+ * the sensor seam like a real admitted run.
+ */
+export function defaultContract(unitId: string, acceptance: Array<{ id: string | null }>): {
+  commands: Array<{ id: string; command: string }>;
+  criterion_map: Record<string, { commands: string[]; evidence_sources: string[] }>;
+} {
+  const criterionMap: Record<string, { commands: string[]; evidence_sources: string[] }> = {};
+  for (const criterion of acceptance) {
+    if (criterion.id !== null) {
+      criterionMap[criterion.id] = { commands: [`${unitId}.CMD1`], evidence_sources: ["verification"] };
+    }
+  }
+  return {
+    commands: [{ id: `${unitId}.CMD1`, command: "npm test" }],
+    criterion_map: criterionMap,
+  };
+}
+
+/** Build a PlanUnit with sane defaults (criterion ids numbered per unit). */
 export function makeUnit(
   id: string,
   number: number,
   opts: Partial<PlanUnit> = {},
 ): PlanUnit {
+  const acceptance =
+    opts.acceptance ??
+    [{ id: `U${number}.AC1`, text: "behaves per contract", tier: "deterministic" }];
   return {
     id,
     number,
@@ -46,7 +72,8 @@ export function makeUnit(
     creates: opts.creates ?? [],
     inputs: opts.inputs ?? [],
     dependsOn: opts.dependsOn ?? [],
-    acceptance: opts.acceptance ?? [DET_CRITERION],
+    acceptance,
+    verificationContract: opts.verificationContract ?? defaultContract(id, acceptance),
     ...opts,
   };
 }
@@ -69,12 +96,16 @@ export interface StepHarness {
   clock: Clock;
   runCommand?: (command: string, cwd: string) => Promise<CommandResultLike>;
   verificationCommandsFor?: (unit: PlanUnit) => string[];
+  verifierEnvelopeFor?: StepContext["verifierEnvelopeFor"];
+  calibrationBasePath?: string;
 }
 
 export interface SetupHarnessOptions {
   config?: Config;
   runCommand?: (command: string, cwd: string) => Promise<CommandResultLike>;
   verificationCommandsFor?: (unit: PlanUnit) => string[];
+  verifierEnvelopeFor?: StepContext["verifierEnvelopeFor"];
+  calibrationBasePath?: string;
   /** Seed the specialist worktree (creates files + envelopes). */
   seed?: (worktree: string) => void;
 }
@@ -108,6 +139,8 @@ export function setupHarness(
     clock: t.clock,
     runCommand: opts.runCommand,
     verificationCommandsFor: opts.verificationCommandsFor,
+    verifierEnvelopeFor: opts.verifierEnvelopeFor,
+    calibrationBasePath: opts.calibrationBasePath,
   };
 }
 
@@ -145,6 +178,48 @@ export function failRunner(command: string): Promise<CommandResultLike> {
   return Promise.resolve({ command, exit_code: 1, stdout: "", stderr: "verification failed\n" });
 }
 
+/**
+ * The harness's default verifier output (KTD5): a valid v2 envelope grading
+ * every non-human criterion pass, with evidence pointers into the composed
+ * package's custodied builder artifacts. This simulates the verifier
+ * specialist writing its envelope — Miah never produces it in production.
+ */
+export function defaultVerifierEnvelope(opts: {
+  unit: PlanUnit;
+  take: number;
+  candidateAttempt: string;
+  packageDir: string;
+  packageSha256: string;
+  workspaceId: string | null;
+}): VerifierEnvelope {
+  const manifest = readPackageManifest(opts.packageDir);
+  const verification = manifest?.builder_artifacts.find((a) => a.key === "verification");
+  const grades = (opts.unit.acceptance ?? [])
+    .filter((c) => c.tier !== "human" && c.id !== null)
+    .map((c) => ({
+      criterion_id: c.id as string,
+      declared_tier: c.tier as string,
+      verdict: "pass" as const,
+      basis: "commands all-passed; evidence genuine and complete (harness)",
+      flagged_for_human: false,
+      evidence:
+        verification !== undefined
+          ? [{ source_role: "builder", source_take: opts.take, artifact: verification.path, sha256: verification.sha256, pointer: "$.all_passed" }]
+          : [],
+    }));
+  return {
+    schema_version: 2,
+    producer_role: "verifier",
+    attempt_id: `dispatch-verifier-${opts.unit.id}-t${opts.take}-a1`,
+    take: opts.take,
+    unit_id: opts.unit.id,
+    candidate_attempt: opts.candidateAttempt,
+    candidate_take: opts.take,
+    evidence_package_sha256: opts.packageSha256,
+    grades,
+  };
+}
+
 const FIXED_DIFF = {
   diff: "diff --git a/src/hello.ts b/src/hello.ts\n+export const hi = 'hi';\n",
   changedFiles: ["src/hello.ts"],
@@ -160,8 +235,12 @@ export function stepContext(h: StepHarness): StepContext {
     canonicalWorktree: h.canonicalWorktree,
     config: h.config,
     diffRunner: async () => FIXED_DIFF,
-    runCommand: h.runCommand,
+    // Default: contract commands (parsed from the unit, R15) pass — the
+    // harness canonical worktree is a plain temp dir with nothing to run.
+    runCommand: h.runCommand ?? passRunner,
     verificationCommandsFor: h.verificationCommandsFor,
+    verifierEnvelopeFor: h.verifierEnvelopeFor ?? defaultVerifierEnvelope,
+    calibrationBasePath: h.calibrationBasePath,
     now: h.clock.fn,
   };
 }
@@ -218,7 +297,11 @@ export async function driveSteps(h: StepHarness, maxSteps = 25): Promise<DriveRe
     if (
       outcome.escalated.length > 0 ||
       allUnitsAccepted(state, units) ||
-      (state.in_flight_intents.length === 0 && outcome.idle)
+      // A failed verifier dispatch leaves the unit awaiting verification with
+      // an idle-looking outcome; that is still executable work (KTD5 retry).
+      (state.in_flight_intents.length === 0 &&
+        Object.keys(state.awaiting_verification).length === 0 &&
+        outcome.idle)
     ) {
       break;
     }

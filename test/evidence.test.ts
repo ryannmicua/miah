@@ -395,6 +395,28 @@ describe("evidence T2-T3 continuity", () => {
       t.store.stateSnapshot().open_gaps.some((g) => g.criterion === "t2-t3-continuity"),
     ).toBe(true);
   });
+
+  it(".miah transport files are excluded from the workspace hash while source edits are not (KTD3, U3.AC4)", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    fs.mkdirSync(path.join(worktree, "src"), { recursive: true });
+    fs.writeFileSync(path.join(worktree, "src", "foo.py"), "print('hi')\n", "utf8");
+
+    const outcome = await harvestEvidence(harvestContext(t, worktree));
+    const harvestHash = outcome.harvestWorkspaceHash;
+
+    // Miah transport writes under .miah (verifier package + envelope) are
+    // expected infrastructure output: they must not open a continuity gap.
+    const miahDir = path.join(worktree, ".miah", "verifier", "U1", "attempt-1");
+    fs.mkdirSync(miahDir, { recursive: true });
+    fs.writeFileSync(path.join(miahDir, "manifest.json"), "package", "utf8");
+    fs.writeFileSync(path.join(worktree, ".miah", "envelope-verifier-U1-t1.json"), "{}", "utf8");
+    expect(workspaceHash(worktree)).toBe(harvestHash);
+
+    // A source mutation still diverges: the gap mechanism stays honest.
+    fs.writeFileSync(path.join(worktree, "src", "foo.py"), "print('EDITED')\n", "utf8");
+    expect(workspaceHash(worktree)).not.toBe(harvestHash);
+  });
 });
 
 /** Create a real temp git repo; returns its initial HEAD commit. */

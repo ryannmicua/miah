@@ -185,9 +185,13 @@ export function createGitDiffRunner(): DiffRunner {
 }
 
 /**
- * Content hash of a workspace's file state (R46): every file under the root
- * (excluding `.git`) contributes `relpath\0sha256(content)`, sorted by path,
- * hashed together. Deterministic across platforms.
+ * Content hash of a workspace's file state (R46, KTD3): every file under the
+ * root (excluding `.git/` and `.miah/`) contributes
+ * `relpath\0sha256(content)`, sorted by path, hashed together. Deterministic
+ * across platforms. `.miah/` is excluded alongside `.git/` because it carries
+ * Miah's own transport files (verifier packages, envelopes) — infrastructure
+ * output that must never create a false continuity failure (KTD3); the
+ * custody chain seals those artifacts individually.
  */
 export function workspaceHash(worktreeRoot: string): string {
   const entries: string[] = [];
@@ -201,6 +205,9 @@ export function workspaceHash(worktreeRoot: string): string {
     for (const entry of children) {
       const entryRel = rel.length === 0 ? entry.name : `${rel}/${entry.name}`;
       if (entryRel === ".git" || entryRel.startsWith(".git/")) {
+        continue;
+      }
+      if (entryRel === ".miah" || entryRel.startsWith(".miah/")) {
         continue;
       }
       const full = path.join(dir, entry.name);
@@ -298,12 +305,12 @@ export interface HarvestOutcome {
   harvestWorkspaceHash: string;
 }
 
-function writeArtifact(evidenceDir: string, filename: string, content: string): HarvestArtifactRef {
+export function writeArtifact(evidenceDir: string, filename: string, content: string): HarvestArtifactRef {
   fs.writeFileSync(path.join(evidenceDir, filename), content, "utf8");
   return { file: filename, sha256: computeArtifactHash(content) };
 }
 
-function toPosix(relPath: string): string {
+export function toPosix(relPath: string): string {
   return relPath.replace(/\\/g, "/");
 }
 

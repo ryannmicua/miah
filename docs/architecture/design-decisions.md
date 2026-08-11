@@ -143,7 +143,7 @@ This document distills the settled design decisions of Miah v1: what was decided
 
 ## 14. Role→model defaults from D8-i, operator-overridable
 
-**Decision.** Each specialist role maps to a Paseo role plus a provider/model pair. Operator's `~/.paseo/orchestration-preferences.json` wins when present; otherwise the D8-i defaults apply (PLAN:D8-i). Tester and reviewer share the `audit` Paseo role and the same provider/model — cross-family contrast is per unit (builder ≠ checker), not per role (ADR:D2-c.5, ADR:C1/C4).
+**Decision.** Each specialist role maps to a Paseo role plus a provider/model pair. Operator's `~/.paseo/orchestration-preferences.json` wins when present; otherwise the D8-i defaults apply (PLAN:D8-i). Tester and verifier share the `audit` Paseo role and the same provider/model — cross-family contrast is per unit (builder ≠ checker), not per role (ADR:D2-c.5, ADR:C1/C4).
 
 **Rationale.** Cross-family contrast is a hedge against shared-training blind spots, not an authority: a checker's verdict earns authority only by clearing the calibration bar (ADR:D2-d, PLAN:R20). The defaults pin the builder to one family and checkers to another.
 
@@ -173,9 +173,9 @@ This document distills the settled design decisions of Miah v1: what was decided
 
 ## 17. D5 grading ladder: deterministic > calibrated-judge > human
 
-**Decision.** Every acceptance criterion declares a tier from the D5 ladder (PLAN:R28). Grading maps evidence to a verdict per tier: `deterministic` (mechanical — verification-contract exit codes), `calibrated-judge` (a reviewer verdict that is authoritative only when the reviewer's profile clears the calibration bar), `human` (operator judgment, the natural fallback). An `ungraded` verdict carries no acceptance authority and escalates (PLAN:R47-R48).
+**Decision.** Every acceptance criterion declares a tier from the D5 ladder (PLAN:R28). Grading maps evidence to a verdict per tier: `deterministic` (mechanical — verification-contract exit codes), `calibrated-judge` (a verifier verdict that is authoritative only when the verifier's profile clears the calibration bar), `human` (operator judgment, the natural fallback). An `ungraded` verdict carries no acceptance authority and escalates (PLAN:R47-R48).
 
-**Rationale.** This is how Miah is "mechanical, not judgmental" (ADR:D1-e): residual judgment is delegated to a dispatched reviewer and returns as an evidence artifact, or to the operator via escalation. Calibration, not model family, grants verdict authority (ADR:D2-d).
+**Rationale.** This is how Miah is "mechanical, not judgmental" (ADR:D1-e): residual judgment is delegated to a dispatched verifier and returns as an evidence artifact, or to the operator via escalation. Calibration, not model family, grants verdict authority (ADR:D2-d).
 
 **Enforced at.** `src/grading.ts:113` (`gradeCriterion`), `src/grading.ts:39` (`tierMeetsOrExceeds`), `src/grading.ts:134` (`gradeDeterministic`), `src/grading.ts:149` (`gradeCalibratedJudge`), `src/grading.ts:173` (`gradeHuman`).
 

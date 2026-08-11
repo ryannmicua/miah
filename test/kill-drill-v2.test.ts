@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readJournalFile } from "../src/journal";
 import { resolveRunLayout, RunStore } from "../src/run-store";
 import { reconcileIntents } from "../src/dispatch";
+import { deriveState } from "../src/replay";
 import { writeEnvelope } from "../src/envelope";
 import { cleanupTempDirs, fastConfig, makeTempDir } from "./helpers";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
@@ -100,9 +101,10 @@ interface DrillScenario {
   runId: string;
   config: unknown;
   holderId: string;
-  mode: "intent-only" | "intent+created";
+  mode: "intent-only" | "intent+created" | "terminated-success";
   intent: Record<string, unknown>;
   created?: Record<string, unknown>;
+  terminated?: Record<string, unknown>;
 }
 
 function spawnDrillChild(basePath: string, scenario: DrillScenario): { child: ChildProcess; marker: string } {
@@ -319,6 +321,84 @@ describe("kill-drill v2", () => {
       const terminated = events.find((e) => e.type === "dispatch_terminated");
       expect(terminated).toMatchObject({ unit_id: "U1", outcome: "success" });
       expect(resumed.stateSnapshot().in_flight_intents).toHaveLength(0);
+    },
+    60_000,
+  );
+
+  it(
+    "kill after successful builder dispatch_terminated → resume → candidate preserved → resumes at verification, no second builder dispatch (U2.AC4, KTD5)",
+    async () => {
+      const basePath = makeTempDir("miah-kd2-");
+      const config = fastConfig({ lease: { heartbeat_interval_s: 0.5, ttl_s: 1 } });
+      const scenario: DrillScenario = {
+        basePath,
+        runId: RUN_ID,
+        config,
+        holderId: "drill-holder",
+        mode: "terminated-success",
+        intent: {
+          sender_role: "miah",
+          role: "builder",
+          unit_id: "U1",
+          take: 1,
+          idempotency_key: "dispatch-builder-U1-t1",
+          packet_hash: "a".repeat(64),
+          deadline: FUTURE_DEADLINE,
+          provider: "opencode",
+          model: "opencode-go/deepseek-v4-flash",
+        },
+        created: {
+          unit_id: "U1",
+          agent_id: "agent-drill-3",
+          workspace_id: "wks-drill-3",
+          base_commit: "commit-frozen",
+        },
+        terminated: {
+          unit_id: "U1",
+          outcome: "success",
+          idempotency_key: "dispatch-builder-U1-t1",
+        },
+      };
+
+      const { child, marker } = spawnDrillChild(basePath, scenario);
+      await waitForFile(marker, 30_000);
+      if (child.exitCode === null) {
+        process.kill(child.pid);
+      }
+      await waitForExit(child, 10_000);
+
+      const layout = resolveRunLayout(basePath, RUN_ID);
+      const beforeResume = readJournalFile(layout.journalPath);
+      const childTypes = beforeResume.events
+        .filter((e) => e.type !== "lease_acquired" && e.type !== "lease_renewed")
+        .map((e) => e.type);
+      expect(childTypes).toEqual(["dispatch_intent", "dispatch_created", "dispatch_terminated"]);
+
+      await waitForStaleLease(layout.leasePath, config.lease.ttl_s, 15_000);
+
+      const resumed = new RunStore({ basePath, runId: RUN_ID, config, holderId: "resumer" });
+      const takeover = resumed.lease.acquire("resumer");
+      expect(takeover.ok).toBe(true);
+      const { state } = resumed.replay();
+
+      // The replay alone (no reconciliation, no dispatch) must resume at the
+      // awaiting-verification boundary: the frozen builder candidate is
+      // preserved with its observed identity, and there is no in-flight
+      // builder intent to re-dispatch.
+      expect(state.in_flight_intents).toHaveLength(0);
+      expect(state.units.U1.status).toBe("awaiting_verification");
+      expect(state.awaiting_verification.U1).toMatchObject({
+        take: 1,
+        attempt: "dispatch-builder-U1-t1",
+        agent_id: "agent-drill-3",
+        workspace_id: "wks-drill-3",
+        base_commit: "commit-frozen",
+        envelope_path: ".miah/envelope-builder-U1-t1.json",
+      });
+
+      // Snapshot-plus-tail replay is byte-identical to the full replay.
+      const full = deriveState(readJournalFile(layout.journalPath).events);
+      expect(JSON.stringify(state)).toBe(JSON.stringify(full));
     },
     60_000,
   );

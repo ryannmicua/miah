@@ -194,7 +194,11 @@ execution: knowledge-work
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - Something — \`tier: deterministic\`
+  - U1.AC1. Something - \`tier: deterministic\`
+- **Verification Contract:**
+  - **Commands:** \`U1.CMD1\` = \`npm test\`
+  - **Criterion mapping:** \`U1.AC1\` -> \`U1.CMD1\`
+  - **Evidence sources:** \`verification\`
 `;
     const result = await admitPlan(knowledgeWorkPlan, admitOptions(makeFakeProbeReport()));
     expect(result.ok).toBe(false);

@@ -12,7 +12,8 @@ import { loadConfig, resolveConfigBasePath } from "../config";
 import { runDriver, type DriverOptions, type DriverResult } from "../driver";
 import { readManifest } from "../manifest";
 import { listRunIds, resolveRunLayout, RunStore } from "../run-store";
-import type { Config } from "../types";
+import type { Config, PlanUnit } from "../types";
+import { verificationCommandsFor as contractVerificationCommandsFor } from "../verification-contract";
 
 /** Exit code used when the run is paused/blocked or the driver could not start. */
 export const RUN_BLOCKED_EXIT_CODE = 1;
@@ -28,6 +29,8 @@ export interface RunCommandOptions {
   diffRunner?: DriverOptions["diffRunner"];
   runCommand?: DriverOptions["runCommand"];
   verificationCommandsFor?: DriverOptions["verificationCommandsFor"];
+  verifierEnvelopeFor?: DriverOptions["verifierEnvelopeFor"];
+  calibrationBasePath?: DriverOptions["calibrationBasePath"];
   now?: () => number;
 }
 
@@ -99,7 +102,11 @@ export async function runCommand(
     once: opts.once ?? false,
     diffRunner: opts.diffRunner,
     runCommand: opts.runCommand,
-    verificationCommandsFor: opts.verificationCommandsFor,
+    // R15: the production run path sources the sensor's commands from the
+    // unit's parsed frozen contract — never an empty runtime default (KTD1).
+    verificationCommandsFor: opts.verificationCommandsFor ?? contractVerificationCommandsFor,
+    verifierEnvelopeFor: opts.verifierEnvelopeFor,
+    calibrationBasePath: opts.calibrationBasePath,
     now: opts.now,
   });
   printRunResult(result);

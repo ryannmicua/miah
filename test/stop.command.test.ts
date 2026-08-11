@@ -37,7 +37,11 @@ const PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -161,7 +165,7 @@ describe("stop command", () => {
       true,
     );
     // Only the original dispatch_intent exists — no re-dispatch after the stop.
-    expect(events.filter((e) => e.type === "dispatch_intent" && e.unit_id === "U1")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U1")).toHaveLength(1);
     // The flag was consumed and the lease released.
     expect(readStopRequested(store.layout)).toBe(false);
     const lease = store.lease.read();

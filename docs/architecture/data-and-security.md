@@ -134,7 +134,7 @@ Source: `src/packet.ts:57-76` (`DispatchPacket`), `src/packet.ts:27-54` (`Author
 | `result_envelope_path` | envelope path relative to worktree root (R43) |
 | `provider`, `model` | resolved profile (D8-i) |
 
-Authority bounds per role (`src/packet.ts:42-54`): planner/reviewer are read-only; builder has code-writing authority for declared `creates:` paths only; scope/requirement/acceptance change is `prohibited`; recursive workers `prohibited`; run-store writes `prohibited`; worktree isolation `mandatory`; result contract `envelope-at-declared-path`.
+Authority bounds per role (`src/packet.ts`): planner/verifier are read-only (the verifier may write only its declared result envelope); builder has code-writing authority for declared `creates:` paths only; scope/requirement/acceptance change is `prohibited`; recursive workers `prohibited`; run-store writes `prohibited`; worktree isolation `mandatory`; result contract `envelope-at-declared-path`.
 
 ## Custody chain
 
@@ -151,7 +151,7 @@ Source: `src/types.ts:312-320`, `PLAN:D8-i`.
 | `planner` | `planning` | `codex` / `gpt-5.6-sol` |
 | `builder` | `impl` | `opencode` / `opencode-go/deepseek-v4-flash` |
 | `tester` | `audit` | `opencode` / `opencode-go/glm-5.2` |
-| `reviewer` | `audit` | `opencode` / `opencode-go/glm-5.2` |
+| `verifier` | `audit` | `opencode` / `opencode-go/glm-5.2` |
 
 Operator's `~/.paseo/orchestration-preferences.json` overrides per-role (paseo_role/provider/model) when present (`src/dispatch.ts:262-280`). Model ids legitimately contain slashes (e.g. `opencode-go/glm-5.2` is a model id, not a repo path); calibration profile filenames sanitize the slash to `_` (`src/calibration.ts:86-88`).
 

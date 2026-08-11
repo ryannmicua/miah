@@ -31,6 +31,6 @@ These constrain any implementation and should not be traded away without operato
 
 - One active approved plan per run; each run is locked to an **immutable plan snapshot**.
 - Run history is an **append-only journal**; workflow state, evidence, statuses, and handoffs are durable and filesystem-based.
-- Builder, tester, and reviewer roles are distinct; testing and review are independent of implementation.
+- Builder, tester, and verifier roles are distinct; testing and verification are independent of implementation.
 - A specialist agent's claim is an evidence input, not a fact — completion requires independent corroboration or a directly verifiable artifact.
 - An escalation pauses only the affected unit and its dependents; unrelated work continues. See `VISION.md` "Escalation boundaries" for the conditions that mandate escalation.

@@ -31,6 +31,7 @@ import {
   reconcileIntents,
   refFromIntent,
   refusePastDeadline,
+  resolveRoleDefaults,
   type DispatchContext,
   type GitCommitReader,
   type HandleResolver,
@@ -45,15 +46,45 @@ import {
   type UsageSnapshot,
 } from "./evidence";
 import { commitIntegrationFiles, evaluateUnitAcceptance } from "./acceptance";
-import { gradeCriterion, type CriterionGrade } from "./grading";
+import {
+  gradeCriterion,
+  gradesFromRefs,
+  type CalibrationResolver,
+  type CriterionGrade,
+} from "./grading";
+import { resolveCalibrationMetrics } from "./calibration";
+import { resolveConfigBasePath } from "./config";
 import { ensurePhase } from "./fsm";
 import { raiseEscalation, summaryFromEvent, unresolvedEscalations, type EscalationSummary } from "./escalation";
-import { defaultEnvelopePath, readEnvelope, type ResultEnvelope } from "./envelope";
+import {
+  defaultEnvelopePath,
+  readEnvelope,
+  readVerifierEnvelope,
+  type ResultEnvelope,
+  type VerifierEnvelope,
+} from "./envelope";
+import {
+  composeVerifierPackage,
+  harvestVerifierResult,
+  readPackageManifest,
+  verifyEnvelopeBinding,
+  verifyEvidencePointers,
+  verifyGradeCoverage,
+} from "./verifier";
 import type { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
 import { readUnitsJson, type RunStore } from "./run-store";
-import type {
+import {
+  hasValidContract,
+  verificationCommandsFor as contractVerificationCommandsFor,
+} from "./verification-contract";
+import type { VerifierPackageManifest } from "./verifier";
+import type { VerifierPacketContext } from "./packet";
+import {
+  AwaitingCandidate,
   Config,
+  CriterionGradeRef,
   DerivedState,
+  GradingTier,
   InFlightIntent,
   PlanUnit,
   SpecialistRole,
@@ -92,8 +123,30 @@ export interface StepContext {
   diffRunner?: DiffRunner;
   /** Verification-contract command runner (R45); injectable for tests. */
   runCommand?: CommandRunner;
-  /** Unit -> verification-contract commands (R45). Defaults to none. */
+  /** Unit -> verification-contract commands (R45). Defaults to the parsed contract (R15, KTD1). */
   verificationCommandsFor?: (unit: PlanUnit) => string[];
+  /**
+   * Calibration lookup for the calibrated-judge authority gate (KTD6/R4).
+   * Defaults to the operator-supplied profile files under the config base
+   * path (R74); absent profiles resolve as not calibrated (fail-closed, R48).
+   */
+  resolveCalibration?: CalibrationResolver;
+  /** Calibration profile base path; defaults to the config base path (R74). */
+  calibrationBasePath?: string;
+  /**
+   * Test seam: produces the v2 envelope a verifier specialist writes at its
+   * declared path before termination. Absent (production): no envelope —
+   * a missing/invalid envelope is a failed verifier attempt on the same
+   * frozen candidate (KTD5). Never called by Miah to manufacture a grade.
+   */
+  verifierEnvelopeFor?: (opts: {
+    unit: PlanUnit;
+    take: number;
+    candidateAttempt: string;
+    packageDir: string;
+    packageSha256: string;
+    workspaceId: string | null;
+  }) => VerifierEnvelope | null;
   now?: () => number;
 }
 
@@ -208,6 +261,19 @@ export function allUnitsAccepted(
 ): boolean {
   const ids = Object.keys(units);
   return ids.length > 0 && ids.every((id) => state.units[id]?.status === "accepted");
+}
+
+/** True when any unit holds a preserved candidate awaiting verifier dispatch (KTD5). */
+export function hasPendingVerification(state: DerivedState): boolean {
+  return Object.keys(state.awaiting_verification).length > 0;
+}
+
+/** The unit's preserved builder candidate, or null. */
+export function candidateOf(
+  state: DerivedState,
+  unitId: UnitId,
+): AwaitingCandidate | null {
+  return state.awaiting_verification[unitId] ?? null;
 }
 
 /** Cumulative usage deltas summed from every harvested usage-delta.json (R81). */
@@ -398,13 +464,27 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
         }
         runtime.handlesByUnit.set(result.intent.unit_id, result.handle);
         if (result.terminatedEvent !== null && !result.refused) {
-          // Reconcile read the envelope and closed the dispatch; now run the full
-          // evidence harvest + acceptance for the terminated attempt. The phase
-          // is Implementing (a prior session dispatched the builder): freeze the
-          // candidate (KTD14) before reviewing it.
+          // Reconcile read the envelope and closed the dispatch; now run the
+          // full role-specific pipeline for the terminated attempt (KTD5). The
+          // phase is Implementing (a prior session dispatched the specialist):
+          // freeze the candidate (KTD14) before verifying it.
           ensurePhase(store, "Reviewing");
-          const envelope = readEnvelopeAt(result.handle, result.intent.unit_id, result.intent.take);
-          const proc = await harvestAndAccept(ctx, runtime, result.intent, result.handle, envelope);
+          const proc =
+            result.intent.role === "verifier"
+              ? await processVerifierTermination(
+                  ctx,
+                  runtime,
+                  result.intent,
+                  result.handle,
+                  readVerifierEnvelopeAt(result.handle, result.intent),
+                )
+              : await processBuilderTermination(
+                  ctx,
+                  runtime,
+                  result.intent,
+                  result.handle,
+                  readEnvelopeAt(result.handle, result.intent.unit_id, result.intent.take),
+                );
           mergeProc(outcome, proc);
         }
       }
@@ -488,6 +568,134 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
     }
   }
 
+  // (5b) Verifier dispatch (KTD5): every unit with a preserved frozen builder
+  // candidate and no in-flight intent is dispatched to the verifier — the
+  // candidate's own workspace, a separate verifier-attempt idempotency key,
+  // and the composed evidence package (KTD3). Launch failures and invalid
+  // results retry the same candidate; the verifier-attempt ceiling raises
+  // repeatedly-fails without spending builder budgets.
+  {
+    const stateBefore = store.stateSnapshot();
+    const inFlightNow = new Set(stateBefore.in_flight_intents.map((i) => i.unit_id));
+    let slotsNow = Math.max(0, cap - stateBefore.in_flight_intents.length);
+    for (const unitId of Object.keys(stateBefore.awaiting_verification)) {
+      if (slotsNow <= 0 || inFlightNow.has(unitId)) {
+        continue;
+      }
+      const unit = units[unitId];
+      const candidate = stateBefore.awaiting_verification[unitId];
+      if (unit === undefined || candidate === undefined) {
+        continue;
+      }
+      // KTD1/R10: a legacy contractless unit fails closed before any verifier
+      // dispatch (the scope-change-needed escalation raised at builder
+      // termination keeps it blocked in Attention until an amendment).
+      if (!hasValidContract(unit)) {
+        continue;
+      }
+      if (verifierBudgetExhausted(store.stateSnapshot(), unitId, ctx.config)) {
+        outcome.escalated.push(escalateVerifierRepeatedlyFails(ctx, unitId));
+        ensurePhase(store, "Attention");
+        return outcome;
+      }
+      const handle = await recoverCandidateHandle(ctx, candidate);
+      if (handle === null || handle.cwd === null) {
+        continue;
+      }
+      const packageDir = path.join(handle.cwd, ".miah", "verifier", unitId, candidate.attempt);
+      let manifest: VerifierPackageManifest | null = null;
+      if (!fs.existsSync(path.join(packageDir, "manifest.json"))) {
+        try {
+          manifest = composeVerifierPackage({
+            store,
+            unit,
+            candidate,
+            worktreeRoot: handle.cwd,
+          }).manifest;
+        } catch (error) {
+          // The candidate cannot be packaged (missing/broken evidence): a
+          // verifier attempt that can never succeed — fail closed.
+          store.append("verifier_attempt_failed", {
+            unit_id: unitId,
+            attempt: candidate.attempt,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+          if (verifierBudgetExhausted(store.stateSnapshot(), unitId, ctx.config)) {
+            outcome.escalated.push(escalateVerifierRepeatedlyFails(ctx, unitId));
+            ensurePhase(store, "Attention");
+            return outcome;
+          }
+          continue;
+        }
+      } else {
+        manifest = readPackageManifest(packageDir);
+      }
+      if (manifest === null) {
+        continue;
+      }
+      const attempt = (stateBefore.units[unitId]?.verifier_attempts ?? 0) + 1;
+      const envelopePath = defaultEnvelopePath("verifier", unitId, candidate.take);
+      const verifier: VerifierPacketContext = {
+        package_path: `.miah/verifier/${unitId}/${candidate.attempt}`,
+        package_sha256: manifest.package_sha256,
+        candidate_attempt: candidate.attempt,
+        candidate_take: candidate.take,
+        workspace_id: candidate.workspace_id,
+        criteria: (unit.acceptance ?? []).map((c) => ({ id: c.id, text: c.text, tier: c.tier })),
+        contract_commands: unit.verificationContract?.commands ?? [],
+        contract_summary: contractSummaryOf(unit),
+      };
+      // Test seam: the verifier specialist writes its v2 envelope at the
+      // declared path before termination (production: nothing here). The seam
+      // output is written to disk only outside production — in production the
+      // envelope can come only from the real specialist agent, never from a
+      // synthetic seam value (the "Miah manufactures a grade" failure mode);
+      // an unguarded seam in production fails closed as a missing envelope.
+      const verifierEnvelope =
+        ctx.verifierEnvelopeFor && process.env.NODE_ENV !== "production"
+          ? ctx.verifierEnvelopeFor({
+              unit,
+              take: candidate.take,
+              candidateAttempt: candidate.attempt,
+              packageDir,
+              packageSha256: manifest.package_sha256,
+              workspaceId: candidate.workspace_id,
+            })
+          : null;
+      if (verifierEnvelope !== null) {
+        const envelopeAbs = path.join(handle.cwd, envelopePath);
+        fs.mkdirSync(path.dirname(envelopeAbs), { recursive: true });
+        fs.writeFileSync(envelopeAbs, `${JSON.stringify(verifierEnvelope, null, 2)}\n`, "utf8");
+      }
+      const dispatched = await dispatchUnit(dispatchCtx(ctx), {
+        unit,
+        role: "verifier",
+        take: candidate.take,
+        idempotencyKey: `dispatch-verifier-${unitId}-t${candidate.take}-a${attempt}`,
+        envelopePath,
+        workspaceId: candidate.workspace_id ?? undefined,
+        verifier,
+      });
+      if (dispatched.status === "created") {
+        runtime.handlesByUnit.set(unitId, dispatched.handle);
+        runtime.noProgressByUnit.delete(unitId);
+        runtime.noProgressFingerprintByUnit.delete(unitId);
+        const inspect = await ctx.adapter.inspect(dispatched.handle);
+        runtime.preUsageByUnit.set(unitId, inspect.usage);
+        ensurePhase(store, "Reviewing");
+        slotsNow -= 1;
+      } else {
+        // KTD5: a verifier launch failure is a failed verifier attempt on the
+        // same frozen candidate — never a builder take or rework cycle.
+        if (verifierBudgetExhausted(store.stateSnapshot(), unitId, ctx.config)) {
+          outcome.escalated.push(escalateVerifierRepeatedlyFails(ctx, unitId));
+          ensurePhase(store, "Attention");
+          return outcome;
+        }
+      }
+    }
+  }
+
   // (6) Poll in-flight specialists. Budget predicates (no-progress, duration)
   // are evaluated before each poll cycle (R81).
   const liveIntents = store.replay().state.in_flight_intents;
@@ -546,27 +754,50 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
     }
 
     outcome.polled.push({ unit_id: intent.unit_id, terminated: true });
-    // Candidate frozen for testing (KTD14): Implementing -> Reviewing.
+    // Candidate frozen for verification (KTD14): Implementing -> Reviewing.
     ensurePhase(store, "Reviewing");
-    const envelopeRel = defaultEnvelopePath("builder", intent.unit_id, intent.take);
-    const harvest = await harvestEnvelope(dispatchCtx(ctx), refFromIntent(intent), handle, envelopeRel);
-    const proc = await harvestAndAccept(ctx, runtime, intent, handle, harvest.envelope);
-    mergeProc(outcome, proc);
+    if (intent.role === "verifier") {
+      const envelopeRel = defaultEnvelopePath("verifier", intent.unit_id, intent.take);
+      const harvest = await harvestEnvelope(dispatchCtx(ctx), refFromIntent(intent), handle, envelopeRel);
+      const proc = await processVerifierTermination(
+        ctx,
+        runtime,
+        intent,
+        handle,
+        harvest.envelope as VerifierEnvelope | null,
+      );
+      mergeProc(outcome, proc);
+    } else {
+      const envelopeRel = defaultEnvelopePath("builder", intent.unit_id, intent.take);
+      const harvest = await harvestEnvelope(dispatchCtx(ctx), refFromIntent(intent), handle, envelopeRel);
+      const proc = await processBuilderTermination(
+        ctx,
+        runtime,
+        intent,
+        handle,
+        harvest.envelope as ResultEnvelope | null,
+      );
+      mergeProc(outcome, proc);
+    }
   }
 
   // (7)-(9) Phase transition per FSM (KTD14). An escalation pauses the run in
   // Attention (raised inline or by a terminated-attempt acceptance). Otherwise:
-  // all done -> AwaitingApproval, in-flight work -> Implementing, a frozen
-  // candidate was reviewed this step -> Reviewing.
+  // all done -> AwaitingApproval, builder work -> Implementing, verifier work
+  // (in-flight, frozen candidate, or harvested this step) -> Reviewing.
   if (outcome.escalated.length > 0) {
     ensurePhase(store, "Attention");
   } else {
     const s = store.replay().state;
     if (allUnitsAccepted(s, units)) {
       ensurePhase(store, "AwaitingApproval");
-    } else if (s.in_flight_intents.length > 0) {
+    } else if (s.in_flight_intents.some((intent) => intent.role !== "verifier")) {
       ensurePhase(store, "Implementing");
-    } else if (outcome.harvested.length > 0) {
+    } else if (
+      s.in_flight_intents.length > 0 ||
+      hasPendingVerification(s) ||
+      outcome.harvested.length > 0
+    ) {
       ensurePhase(store, "Reviewing");
     }
   }
@@ -584,7 +815,7 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
 }
 
 // ---------------------------------------------------------------------------
-// Terminated-specialist pipeline: harvest -> grade -> accept -> rework/escalate
+// Terminated-specialist pipelines (KTD5/KTD6): builder -> verifier -> accept
 // ---------------------------------------------------------------------------
 
 interface HarvestProc {
@@ -601,14 +832,100 @@ function mergeProc(outcome: StepOutcome, proc: HarvestProc): void {
   outcome.harvested.push(...proc.harvested);
 }
 
+/** Human-readable criterion -> command mapping for the verifier packet (KTD3). */
+function contractSummaryOf(unit: PlanUnit): string {
+  const contract = unit.verificationContract;
+  if (contract === null || contract === undefined) {
+    return "no contract";
+  }
+  return Object.entries(contract.criterion_map)
+    .map(([criterionId, mapping]) => `${criterionId} -> ${mapping.commands.join(", ") || "(no commands)"}`)
+    .join("; ");
+}
+
+/** Recover the frozen candidate's workspace handle from its recorded identity. */
+async function recoverCandidateHandle(
+  ctx: StepContext,
+  candidate: AwaitingCandidate,
+): Promise<PaseoHandle | null> {
+  if (candidate.agent_id === null || candidate.agent_id === "") {
+    return null;
+  }
+  try {
+    const inspect = await ctx.adapter.inspect({
+      agentId: candidate.agent_id,
+      cwd: null,
+      workspaceId: candidate.workspace_id,
+    });
+    return {
+      agentId: candidate.agent_id,
+      cwd: inspect.cwd ?? null,
+      workspaceId: candidate.workspace_id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** KTD5: verifier-attempt budget against the separate per-candidate ceiling. */
+function verifierBudgetExhausted(
+  state: DerivedState,
+  unitId: UnitId,
+  config: Config,
+): boolean {
+  const s = state.units[unitId];
+  return (
+    s !== undefined &&
+    s.verifier_attempts >= config.run.max_takes &&
+    s.last_acceptance !== "accept"
+  );
+}
+
+/** Escalate at the verifier-attempt ceiling (KTD5/R77: verifier-dispatch reason). */
+function escalateVerifierRepeatedlyFails(
+  ctx: StepContext,
+  unitId: UnitId,
+): EscalationSummary {
+  return raiseEscalationSummary(ctx, {
+    unit_id: unitId,
+    trigger: "repeatedly-fails",
+    reason: `max verifier attempts exceeded for ${unitId} (verifier-dispatch, KTD5)`,
+  });
+}
+
+/** The calibration gate for calibrated-judge verdicts (KTD6, R4/R74). */
+function resolveCalibrationFor(
+  ctx: StepContext,
+): CalibrationResolver {
+  if (ctx.resolveCalibration !== undefined) {
+    return ctx.resolveCalibration;
+  }
+  const basePath = ctx.calibrationBasePath ?? resolveConfigBasePath();
+  return (provider, model, tier) =>
+    resolveCalibrationMetrics(provider, model, tier, ctx.config.calibration, basePath);
+}
+
+function readVerifierEnvelopeAt(
+  handle: PaseoHandle,
+  intent: InFlightIntent,
+): VerifierEnvelope | null {
+  if (handle.cwd === null) {
+    return null;
+  }
+  return readVerifierEnvelope(
+    path.join(handle.cwd, defaultEnvelopePath("verifier", intent.unit_id, intent.take)),
+  );
+}
+
 /**
- * For one terminated builder: harvest evidence (U6), verify custody + T2-T3
- * continuity, grade and evaluate acceptance (U7), and route the unit — accept,
- * bounded rework (KTD13), or escalation (R77/R78/R82). The dispatch itself
- * (envelope read + `dispatch_terminated`) is the caller's job, so this never
- * double-closes an intent.
+ * For one terminated builder (KTD5): fail closed on a missing contract, then
+ * harvest evidence, verify custody + T2-T3 continuity, and preserve the frozen
+ * candidate for verifier dispatch. The dispatch itself (envelope read +
+ * `dispatch_terminated`) is the caller's job, so this never double-closes an
+ * intent. Miah grades nothing here — the verifier's envelope entries and the
+ * operator's decisions are the only grade sources (KTD6).
  */
-async function harvestAndAccept(
+async function processBuilderTermination(
   ctx: StepContext,
   runtime: StepRuntime,
   intent: InFlightIntent,
@@ -622,12 +939,29 @@ async function harvestAndAccept(
   if (unit === undefined) {
     return proc;
   }
+
+  // KTD1/R10: a unit without a parsed verification contract cannot be sensed
+  // or verified. It stays blocked under scope-change-needed until an
+  // operator-approved amendment supplies a valid contract — the commands never
+  // run and no verifier is dispatched.
+  if (!hasValidContract(unit)) {
+    proc.escalated.push(
+      raiseEscalationSummary(ctx, {
+        unit_id: intent.unit_id,
+        trigger: "scope-change-needed",
+        reason: `unit ${intent.unit_id} has no verification contract; operator-approved amendment required (KTD1/R10)`,
+      }),
+    );
+    ensurePhase(store, "Attention");
+    return proc;
+  }
+
   const role: SpecialistRole = "builder";
   const take = intent.take;
   const worktreeRoot = handle.cwd ?? "";
   const verificationCommands = ctx.verificationCommandsFor
     ? ctx.verificationCommandsFor(unit)
-    : [];
+    : contractVerificationCommandsFor(unit);
 
   const evidence = await harvestEvidence({
     store,
@@ -660,29 +994,189 @@ async function harvestAndAccept(
     integrationHash,
   });
 
-  // Grade each criterion from the harvested builder evidence. The deterministic
-  // tier reads the verification-contract outcome; calibrated-judge / human
-  // criteria remain ungraded and escalate (no reviewer/operator input in U8).
-  const records: CriterionGrade[] = (unit.acceptance ?? []).map((criterion) =>
-    gradeCriterion({
+  // The successful builder termination already derived the awaiting-
+  // verification candidate (KTD5); the verifier dispatch happens at the next
+  // step boundary so a crash here resumes at verification, never a new take.
+  return proc;
+}
+
+/**
+ * For one terminated verifier (KTD5/KTD6): validate the v2 envelope against
+ * the frozen candidate and package, custody the result, map envelope entries
+ * into durable CriterionGrade references (applying the calibration authority
+ * gate), then evaluate the predicate and route accept / bounded rework /
+ * escalation. An invalid result is a failed verifier attempt on the same
+ * frozen candidate; only a valid verifier fail grade starts builder rework.
+ */
+async function processVerifierTermination(
+  ctx: StepContext,
+  runtime: StepRuntime,
+  intent: InFlightIntent,
+  handle: PaseoHandle,
+  envelope: VerifierEnvelope | null,
+): Promise<HarvestProc> {
+  const store = ctx.store;
+  const units = runtime.units ?? {};
+  const unit = units[intent.unit_id];
+  const proc: HarvestProc = { accepted: [], reworked: [], escalated: [], harvested: [] };
+  if (unit === undefined) {
+    return proc;
+  }
+  const state = store.stateSnapshot();
+  const candidate = state.awaiting_verification[intent.unit_id];
+
+  // A missing/invalid v2 envelope is a failed verifier attempt (the dispatch
+  // already closed with a non-success outcome, which replay counted).
+  if (envelope === null || candidate === undefined) {
+    if (verifierBudgetExhausted(store.stateSnapshot(), intent.unit_id, ctx.config)) {
+      proc.escalated.push(escalateVerifierRepeatedlyFails(ctx, intent.unit_id));
+    }
+    return proc;
+  }
+
+  const worktreeRoot = handle.cwd ?? "";
+  const packageDir = path.join(worktreeRoot, ".miah", "verifier", unit.id, candidate.attempt);
+  const manifest = readPackageManifest(packageDir);
+  const binding = verifyEnvelopeBinding(envelope, packageDir, candidate, manifest);
+  const coverage = verifyGradeCoverage(envelope, unit);
+  const pointers = verifyEvidencePointers(envelope, packageDir, manifest);
+
+  if (!binding.ok || !coverage.ok || !pointers.ok) {
+    const reason = [binding.reason, coverage.reason, pointers.reason]
+      .filter((part): part is string => part !== null)
+      .join("; ");
+    // KTD5: an invalid verifier result is a failed verifier attempt on the
+    // same frozen candidate — never a builder take or a rework cycle.
+    store.append("verifier_attempt_failed", {
+      unit_id: intent.unit_id,
+      attempt: intent.idempotency_key,
+      reason,
+    });
+    if (verifierBudgetExhausted(store.stateSnapshot(), intent.unit_id, ctx.config)) {
+      proc.escalated.push(escalateVerifierRepeatedlyFails(ctx, intent.unit_id));
+    }
+    return proc;
+  }
+
+  // Custody the verifier result before acceptance reads it (KTD4): envelope,
+  // usage delta, and result record — commands are never re-run here (U3.AC5).
+  const inspect = await ctx.adapter.inspect(handle);
+  const result = harvestVerifierResult({
+    store,
+    unitId: unit.id,
+    candidate,
+    verifierAttempt: intent.idempotency_key,
+    verifierAgentId: intent.agent_id ?? "unknown",
+    worktreeRoot,
+    envelope,
+    preDispatchUsage: runtime.preUsageByUnit.get(intent.unit_id) ?? EMPTY_USAGE,
+    postTerminationUsage: inspect.usage,
+    now: ctx.now,
+  });
+  proc.harvested.push({ unit_id: intent.unit_id, take: candidate.take, role: "verifier" });
+
+  // T2-T3 continuity across the verifier phase (KTD3): `.miah/` transport
+  // writes are excluded from the hash, so only source mutation opens a gap.
+  const vHash = workspaceHash(worktreeRoot);
+  takeContinuityRecord(store, {
+    unit_id: intent.unit_id,
+    role: "verifier",
+    take: candidate.take,
+    harvestHash: vHash,
+    integrationHash: vHash,
+  });
+
+  // KTD6: verifier envelope entries are the only grade source (with operator
+  // decisions). The calibration gate applies to calibrated-judge verdicts;
+  // deterministic certification needs no profile (KD6).
+  const profile = resolveRoleDefaultsFor(ctx);
+  const grades: CriterionGradeRef[] = [];
+  for (const criterion of unit.acceptance ?? []) {
+    if (criterion.tier === "human" || criterion.id === null) {
+      continue;
+    }
+    const entry = envelope.grades.find((grade) => grade.criterion_id === criterion.id);
+    if (entry === undefined) {
+      continue;
+    }
+    const graded = gradeCriterion(
+      {
+        criterion: criterion.text,
+        tier: entry.declared_tier as GradingTier,
+        // KTD4: the verifier's verdict passes through unchanged — including
+        // its own `ungraded` declaration, which grading routes to escalation
+        // (never converted to the null "envelope missing" path).
+        verifierVerdict: entry.verdict,
+        verifierProvider: profile.provider,
+        verifierModel: profile.model,
+      },
+      { resolveCalibration: resolveCalibrationFor(ctx) },
+    );
+    grades.push({
+      criterion_id: criterion.id,
       criterion: criterion.text,
-      tier: criterion.tier as CriterionGrade["tier"],
-      verificationAllPassed: evidence.record.verification.all_passed,
-    }),
+      tier: graded.tier,
+      grade: graded.grade,
+      route: graded.route,
+      basis: entry.flagged_for_human
+        ? "verifier-flagged-for-human-judgment"
+        : graded.basis,
+      source: "verifier",
+    });
+  }
+  store.append("criterion_grades_recorded", {
+    unit_id: intent.unit_id,
+    take: candidate.take,
+    verifier_attempt: intent.idempotency_key,
+    grades,
+  });
+
+  // Evaluate acceptance from the durable grades (KTD6: resume re-evaluates
+  // without parsing specialist prose).
+  const stateAfter = store.stateSnapshot();
+  const records: CriterionGrade[] = gradesFromRefs(
+    stateAfter.criterion_grades[intent.unit_id] ?? [],
   );
 
-  // Acceptance transition (R51 + R54): predicate, then integration check.
+  // KTD7: a verifier flag raises `verifier-flagged-for-human-judgment` with
+  // the complete payload — one criterion-level escalation per flagged entry —
+  // and suppresses the generic predicate escalation (exactly one trigger).
+  const flagged = envelope.grades.filter((grade) => grade.flagged_for_human);
+  for (const entry of flagged) {
+    const criterion = (unit.acceptance ?? []).find((c) => c.id === entry.criterion_id);
+    raiseEscalation(ctx.store, {
+      unit_id: intent.unit_id,
+      trigger: "verifier-flagged-for-human-judgment",
+      reason: `verifier flagged criterion ${entry.criterion_id} for human judgment`,
+      criterion: criterion?.text ?? null,
+      // KTD7 payload:
+      payload: {
+        criterion_id: entry.criterion_id,
+        declared_tier: entry.declared_tier,
+        verifier_attempt: intent.idempotency_key,
+        verifier_provider: profile.provider,
+        verifier_model: profile.model,
+        basis: entry.basis,
+        evidence_package_sha256: envelope.evidence_package_sha256,
+        evidence: entry.evidence,
+      },
+    });
+  }
+  const escalationOverride =
+    flagged.length > 0 ? { trigger: "verifier-flagged-for-human-judgment", payload: {} } : null;
+
   const acceptance = await evaluateUnitAcceptance({
     store,
     unit,
     records,
-    openGaps: store.stateSnapshot().open_gaps,
+    openGaps: stateAfter.open_gaps,
+    escalationOverride,
     integration: {
       store,
       unit,
       sourceWorktree: worktreeRoot,
       canonicalWorktree: ctx.canonicalWorktree,
-      verificationCommands,
+      verificationCommands: contractVerificationCommandsFor(unit),
       runCommand: ctx.runCommand,
       commitIntegration: commitIntegrationFiles,
     },
@@ -694,15 +1188,14 @@ async function harvestAndAccept(
   }
 
   if (acceptance.verdict.route === "escalate") {
-    // applyAcceptance already appended escalation_raised (R82 trigger:
-    // no-checker-profile / operator-judgment).
     if (acceptance.applied.escalationEvent !== null) {
       proc.escalated.push(summaryFromEvent(acceptance.applied.escalationEvent));
     }
     return proc;
   }
 
-  // Route to bounded rework (KTD13) unless a budget is exhausted (R77/R78).
+  // A valid verifier fail grade routes to bounded builder rework (KTD5),
+  // unless a budget is exhausted (R77/R78).
   const s = store.stateSnapshot().units[intent.unit_id];
   const takesExhausted = s !== undefined && s.takes >= ctx.config.run.max_takes;
   const reworkExhausted = s !== undefined && s.rework_cycles >= ctx.config.run.max_rework_cycles;
@@ -714,4 +1207,9 @@ async function harvestAndAccept(
   const cycle = store.stateSnapshot().units[intent.unit_id]?.rework_cycles ?? 0;
   proc.reworked.push({ unit_id: intent.unit_id, rework_cycle: cycle });
   return proc;
+}
+
+/** D8-i profile for the verifier role (operator preferences override, R14). */
+function resolveRoleDefaultsFor(ctx: StepContext): { paseo_role: string; provider: string; model: string } {
+  return resolveRoleDefaults("verifier", { preferencesPath: ctx.preferencesPath });
 }

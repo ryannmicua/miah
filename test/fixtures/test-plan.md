@@ -36,8 +36,8 @@ execution: code
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - `src/hello.ts` exists and exports a greeting — `tier: deterministic`
-  - The module is valid Node-compatible TypeScript — `tier: deterministic`
+  - U1.AC1. `src/hello.ts` exists and exports a greeting — `tier: deterministic`
+  - U1.AC2. The module is valid Node-compatible TypeScript — `tier: deterministic`
 - **Approach:** Write a single exported greeting function. Write the result
   envelope as a FLAT JSON object: the keys `schema_version`, `producer_role`,
   `attempt_id`, `take`, `unit_id`, `self_claim`, `produced_files`,
@@ -47,6 +47,10 @@ execution: code
 - **Test Scenarios:**
   - Importing the module resolves.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U1.CMD1` = `node -e "const fs=require('fs');if(!fs.existsSync('src/hello.ts'))process.exit(1);const t=fs.readFileSync('src/hello.ts','utf8');if(!t.includes('export'))process.exit(1)"`
+  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`; `U1.AC2` -> `U1.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U2. Consumer module
 
@@ -57,8 +61,8 @@ execution: code
 - **inputs:** `src/hello.ts`
 - **depends-on:** U1
 - **Acceptance:**
-  - `src/greeter.ts` imports `src/hello.ts` — `tier: deterministic`
-  - A reviewer confirms the greeting API is used correctly — `tier: calibrated-judge`
+  - U2.AC1. `src/greeter.ts` imports `src/hello.ts` — `tier: deterministic`
+  - U2.AC2. A verifier confirms the greeting API is used correctly — `tier: calibrated-judge`
 - **Approach:** Import and reuse U1's export. Write the result envelope as a
   FLAT JSON object: `schema_version`, `producer_role`, `attempt_id`, `take`,
   `unit_id`, `self_claim`, `produced_files`, `wall_clock_estimate_s` must all
@@ -67,6 +71,10 @@ execution: code
 - **Test Scenarios:**
   - Greeting output is correct.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U2.CMD1` = `node -e "const fs=require('fs');if(!fs.existsSync('src/hello.ts'))process.exit(1);const t=fs.readFileSync('src/hello.ts','utf8');if(!t.includes('export'))process.exit(1);if(!fs.existsSync('src/greeter.ts')&&!fs.existsSync('src/greeter-renamed.ts'))process.exit(1)"`
+  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`; `U2.AC2` ->
+  - **Evidence sources:** `verification`
 
 ### U3. Config module
 
@@ -77,7 +85,7 @@ execution: code
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - `config/app.json` is valid JSON — `tier: deterministic`
+  - U3.AC1. `config/app.json` is valid JSON — `tier: deterministic`
 - **Approach:** Add a static application config. Write the result envelope as a
   FLAT JSON object: `schema_version`, `producer_role`, `attempt_id`, `take`,
   `unit_id`, `self_claim`, `produced_files`, `wall_clock_estimate_s` must all
@@ -86,6 +94,10 @@ execution: code
 - **Test Scenarios:**
   - Config parses.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U3.CMD1` = `node -e "JSON.parse(require('fs').readFileSync('config/app.json','utf8'))"`
+  - **Criterion mapping:** `U3.AC1` -> `U3.CMD1`
+  - **Evidence sources:** `verification`
 
 ## Verification Contract
 

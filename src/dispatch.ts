@@ -27,9 +27,15 @@ import * as os from "os";
 import * as path from "path";
 import { setTimeout as sleep } from "timers/promises";
 import { PaseoAdapter, PaseoHandle } from "./adapter/paseo";
-import { readEnvelope, defaultEnvelopePath, type ResultEnvelope } from "./envelope";
+import {
+  readEnvelope,
+  readVerifierEnvelope,
+  defaultEnvelopePath,
+  type ResultEnvelope,
+  type VerifierEnvelope,
+} from "./envelope";
 import { readManifest } from "./manifest";
-import { composePacket, computePacketHash, extractUnitSection, renderPacketPrompt, type DispatchPacket } from "./packet";
+import { composePacket, computePacketHash, extractUnitSection, renderPacketPrompt, type DispatchPacket, type VerifierPacketContext } from "./packet";
 import { readUnitsJson, RunStore, type RunStoreLayout } from "./run-store";
 import {
   Config,
@@ -119,6 +125,18 @@ export interface DispatchOptions {
   envelopePath?: string;
   /** Overrides the default plan excerpt (planner gets the full snapshot, R8). */
   planExcerpt?: string;
+  /**
+   * Overrides the derived idempotency key (KTD5): verifier retries on the same
+   * frozen candidate reuse the builder take but need a distinct attempt key.
+   */
+  idempotencyKey?: string;
+  /**
+   * Attaches the dispatch to an existing workspace instead of the run default
+   * (KTD3): the verifier joins the observed builder candidate workspace.
+   */
+  workspaceId?: string;
+  /** Verifier-only packet context (KTD3/KTD4). */
+  verifier?: VerifierPacketContext;
 }
 
 export type DispatchOutcome =
@@ -145,14 +163,14 @@ export type PollResult =
   | {
       status: "terminated";
       terminatedEvent: JournalEvent;
-      envelope: ResultEnvelope | null;
+      envelope: ResultEnvelope | VerifierEnvelope | null;
       gapEvent: JournalEvent | null;
     }
   | { status: "gave-up"; lastStatus: string };
 
 export interface HarvestResult {
   terminatedEvent: JournalEvent;
-  envelope: ResultEnvelope | null;
+  envelope: ResultEnvelope | VerifierEnvelope | null;
   gapEvent: JournalEvent | null;
 }
 
@@ -315,7 +333,7 @@ export async function dispatchUnit(
   const deadline = opts.deadline ?? new Date(now + DEFAULT_MAX_DURATION_S * 1000).toISOString();
   const profile = (ctx.roleResolver ?? ((role) => resolveRoleDefaults(role, { preferencesPath: ctx.preferencesPath })))(opts.role);
   const envelopePath = opts.envelopePath ?? defaultEnvelopePath(opts.role, opts.unit.id, opts.take);
-  const key = idempotencyKeyFor(opts.unit.id, opts.role, opts.take);
+  const key = opts.idempotencyKey ?? idempotencyKeyFor(opts.unit.id, opts.role, opts.take);
 
   const planSnapshotText = readPlanSnapshot(ctx.store.layout);
   const planExcerpt =
@@ -334,6 +352,7 @@ export async function dispatchUnit(
     deadline,
     provider: profile.provider,
     model: profile.model,
+    verifier: opts.verifier,
   });
   const packetHash = computePacketHash(packet);
 
@@ -357,12 +376,15 @@ export async function dispatchUnit(
       title: dispatchTitle(opts.role, opts.unit.id, opts.take),
       workspace: "worktree",
       worktreeMode: "branch-off",
-      workspaceId: defaultWorkspaceOf(ctx),
+      workspaceId: opts.workspaceId ?? defaultWorkspaceOf(ctx),
       cwd: ctx.repoRoot,
     });
     const baseCommit = (ctx.gitReader ?? defaultGitCommitReader)(ctx.repoRoot);
     const created = ctx.store.append("dispatch_created", {
       unit_id: opts.unit.id,
+      role: opts.role,
+      take: opts.take,
+      attempt: key,
       agent_id: handle.agentId,
       workspace_id: handle.workspaceId,
       base_commit: baseCommit,
@@ -378,6 +400,9 @@ export async function dispatchUnit(
   } catch (error) {
     const failed = ctx.store.append("dispatch_failed", {
       unit_id: opts.unit.id,
+      role: opts.role,
+      take: opts.take,
+      attempt: key,
       idempotency_key: key,
       reason: error instanceof Error ? error.message : String(error),
     });
@@ -398,7 +423,25 @@ export async function harvestEnvelope(
 ): Promise<HarvestResult> {
   const envelopeAbs =
     handle.cwd !== null ? path.join(handle.cwd, envelopeRelPath) : null;
-  const envelope = envelopeAbs !== null ? readEnvelope(envelopeAbs) : null;
+  // KTD4: the verifier emits the v2 envelope; every other role emits v1.
+  const envelope =
+    envelopeAbs !== null
+      ? intent.role === "verifier"
+        ? readVerifierEnvelope(envelopeAbs)
+        : readEnvelope(envelopeAbs)
+      : null;
+
+  // KTD5 correlation fields: role, take, and attempt ride the terminal events
+  // so replay never depends on event order to know whose dispatch closed.
+  const correlation = {
+    unit_id: intent.unit_id,
+    role: intent.role,
+    take: intent.take,
+    attempt: intent.idempotency_key,
+    agent_id: handle.agentId,
+    workspace_id: handle.workspaceId,
+    envelope_rel_path: envelopeRelPath,
+  };
 
   if (envelope !== null) {
     ctx.store.append("result_envelope_observed", {
@@ -409,7 +452,7 @@ export async function harvestEnvelope(
       take: envelope.take,
     });
     const terminatedEvent = ctx.store.append("dispatch_terminated", {
-      unit_id: intent.unit_id,
+      ...correlation,
       outcome: "success",
       envelope_path: envelopeAbs,
     });
@@ -426,7 +469,7 @@ export async function harvestEnvelope(
       "result envelope absent at declared path after specialist termination (R43)",
   });
   const terminatedEvent = ctx.store.append("dispatch_terminated", {
-    unit_id: intent.unit_id,
+    ...correlation,
     outcome: "envelope-missing",
     envelope_path: envelopeAbs,
   });
@@ -456,6 +499,11 @@ export async function refusePastDeadline(
   });
   const terminatedEvent = ctx.store.append("dispatch_terminated", {
     unit_id: intent.unit_id,
+    role: intent.role,
+    take: intent.take,
+    attempt: intent.idempotency_key,
+    agent_id: handle.agentId,
+    workspace_id: handle.workspaceId,
     outcome: "deadline-exceeded",
     idempotency_key: intent.idempotency_key,
   });
@@ -544,6 +592,9 @@ async function reconcileOne(
       });
       const failedEvent = ctx.store.append("dispatch_failed", {
         unit_id: intent.unit_id,
+        role: intent.role,
+        take: intent.take,
+        attempt: intent.idempotency_key,
         idempotency_key: intent.idempotency_key,
         reason: "reconciliation: no handle found for recorded dispatch intent (R37)",
       });
@@ -560,6 +611,9 @@ async function reconcileOne(
     }
     createdEvent = ctx.store.append("dispatch_created", {
       unit_id: intent.unit_id,
+      role: intent.role,
+      take: intent.take,
+      attempt: intent.idempotency_key,
       agent_id: handle.agentId,
       workspace_id: handle.workspaceId,
       base_commit: (ctx.gitReader ?? defaultGitCommitReader)(ctx.repoRoot),

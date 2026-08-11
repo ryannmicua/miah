@@ -30,7 +30,11 @@ const PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/a.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/a.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 

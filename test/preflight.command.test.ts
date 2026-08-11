@@ -100,7 +100,11 @@ execution: code
 - **inputs:** \`src/existing.ts\`
 - **depends-on:** none
 - **Acceptance:**
-  - out exists — \`tier: deterministic\`
+  - U1.AC1. out exists - \`tier: deterministic\`
+- **Verification Contract:**
+  - **Commands:** \`U1.CMD1\` = \`npm test\`
+  - **Criterion mapping:** \`U1.AC1\` -> \`U1.CMD1\`
+  - **Evidence sources:** \`verification\`
 `,
       "utf8",
     );

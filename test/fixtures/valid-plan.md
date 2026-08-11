@@ -22,7 +22,7 @@ A minimal CE `ce-unified-plan/v1` fixture modeled on the Miah plan's own U1/U2/U
 structure: U1 creates a source module, U2 consumes it (depends-on U1), and U3 is
 an independent config unit. Every unit carries the Miah admission fields
 (`creates:`, `inputs:`, `depends-on`, and an `Acceptance` block with per-criterion
-tiers per R24-R28).
+tiers per R24-R28) plus a frozen verification contract (KTD1, R8-R10).
 
 ## Implementation Units
 
@@ -43,12 +43,16 @@ tiers per R24-R28).
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - `src/hello.ts` exists and exports a greeting — `tier: deterministic`
-  - The module compiles under `tsc` — `tier: deterministic`
+  - U1.AC1. `src/hello.ts` exists and exports a greeting — `tier: deterministic`
+  - U1.AC2. The module compiles under `tsc` — `tier: deterministic`
 - **Approach:** Write a single exported greeting function.
 - **Test Scenarios:**
   - Importing the module resolves.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U1.CMD1` = `npm test -- test/parser.test.ts`
+  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`; `U1.AC2` -> `U1.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U2. Consumer module
 
@@ -59,12 +63,16 @@ tiers per R24-R28).
 - **inputs:** `src/hello.ts`
 - **depends-on:** U1
 - **Acceptance:**
-  - `src/greeter.ts` imports `src/hello.ts` — `tier: deterministic`
-  - A reviewer confirms the module meets the intended interface — `tier: calibrated-judge`
+  - U2.AC1. `src/greeter.ts` imports `src/hello.ts` — `tier: deterministic`
+  - U2.AC2. A verifier confirms the module meets the intended interface — `tier: calibrated-judge`
 - **Approach:** Import and reuse U1's export.
 - **Test Scenarios:**
   - Greeting output is correct.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U2.CMD1` = `npm test -- test/greeter.test.ts`
+  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`; `U2.AC2` ->
+  - **Evidence sources:** `verification`
 
 ### U3. Config module
 
@@ -75,11 +83,15 @@ tiers per R24-R28).
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - `config/app.json` is valid JSON — `tier: deterministic`
+  - U3.AC1. `config/app.json` is valid JSON — `tier: deterministic`
 - **Approach:** Add a static application config.
 - **Test Scenarios:**
   - Config parses.
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U3.CMD1` = `npm test -- test/config.test.ts`
+  - **Criterion mapping:** `U3.AC1` -> `U3.CMD1`
+  - **Evidence sources:** `verification`
 
 ## Verification Contract
 

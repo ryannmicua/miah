@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   defaultGitCommitReader,
   dispatchUnit,
+  harvestEnvelope,
   isPastDeadline,
   pollUntilTerminal,
   reconcileIntents,
@@ -70,6 +71,7 @@ const UNIT_U1: PlanUnit = {
   inputs: [],
   dependsOn: [],
   acceptance: null,
+  verificationContract: null,
 };
 
 function unitsJson(): Record<string, PlanUnit> {
@@ -330,6 +332,33 @@ describe("dispatch pipeline", () => {
     expect(resolveRoleDefaults("planner", { preferencesPath: prefsPath })).toEqual(
       D8I_ROLE_DEFAULTS.planner,
     );
+  });
+
+  it("U4.AC1: verifier defaults to Paseo audit (replacing the reviewer row) with operator preferences overriding", () => {
+    const absent = resolveRoleDefaults("verifier", {
+      preferencesPath: path.join(makeTempDir(), "missing.json"),
+    });
+    // R14: the verifier inherits the reviewer's D8-i defaults: audit role.
+    expect(absent.paseo_role).toBe("audit");
+    expect(absent).toEqual(D8I_ROLE_DEFAULTS.verifier);
+
+    // Operator orchestration preferences override provider, model, and role.
+    const prefsDir = makeTempDir();
+    const prefsPath = path.join(prefsDir, "orchestration-preferences.json");
+    fs.writeFileSync(
+      prefsPath,
+      JSON.stringify({ verifier: { paseo_role: "audit", provider: "anthropic", model: "claude-sonnet-4" } }),
+      "utf8",
+    );
+    expect(resolveRoleDefaults("verifier", { preferencesPath: prefsPath })).toEqual({
+      paseo_role: "audit",
+      provider: "anthropic",
+      model: "claude-sonnet-4",
+    });
+    // KTD8: `reviewer` is no longer an active role — the D8-i table has no row
+    // for it, so resolving it is impossible by construction.
+    expect(Object.keys(D8I_ROLE_DEFAULTS)).not.toContain("reviewer");
+    expect(Object.keys(D8I_ROLE_DEFAULTS)).toContain("verifier");
   });
 
   it("dispatch a planner: packet has plan snapshot only (no code-writing authority); envelope read after termination", async () => {
@@ -844,3 +873,98 @@ function makeGitRepo(dir: string): string {
   cp.execFileSync("git", ["-C", dir, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
   return cp.execFileSync("git", ["-C", dir, "rev-parse", "HEAD"]).toString().trim();
 }
+
+describe("dispatch role correlation (KTD5)", () => {
+  it("created/failed/terminated events carry role, take, and attempt so replay correlates by intent", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    const adapter = new ScriptedAdapter();
+    adapter.launchResult = { agentId: "agent-1", cwd: worktree, workspaceId: "wks_1" };
+    const ctx = makeCtx(t, adapter, { gitReader: () => "commit-fake" });
+
+    const outcome = await dispatchUnit(ctx, {
+      unit: UNIT_U1,
+      role: "builder",
+      take: 2,
+      deadline: futureDeadline(t.clock.now),
+    });
+    expect(outcome.status).toBe("created");
+
+    const events = t.store.journal.readEvents();
+    const intent = events.find((e) => e.type === "dispatch_intent");
+    const created = events.find((e) => e.type === "dispatch_created");
+    expect(intent).toMatchObject({ role: "builder", take: 2, unit_id: "U1" });
+    expect(created).toMatchObject({
+      role: "builder",
+      take: 2,
+      attempt: "dispatch-builder-U1-t2",
+      agent_id: "agent-1",
+      workspace_id: "wks_1",
+    });
+
+    // The verifier path can override the idempotency key (same frozen
+    // candidate, new attempt) and attach to an existing workspace (KTD3).
+    adapter.launchResult = { agentId: "agent-v", cwd: worktree, workspaceId: "wks_1" };
+    const verifier = await dispatchUnit(ctx, {
+      unit: UNIT_U1,
+      role: "verifier",
+      take: 2,
+      deadline: futureDeadline(t.clock.now),
+      idempotencyKey: "dispatch-verifier-U1-t2-a1",
+      workspaceId: "wks_1",
+    });
+    expect(verifier.status).toBe("created");
+    const vIntent = t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "dispatch_intent")
+      .pop();
+    expect(vIntent).toMatchObject({
+      role: "verifier",
+      take: 2,
+      idempotency_key: "dispatch-verifier-U1-t2-a1",
+    });
+    expect(adapter.launchCalls[1].opts.workspaceId).toBe("wks_1");
+  });
+
+  it("harvestEnvelope terminates with role/take/attempt correlation and the envelope-rel path", async () => {
+    const t = setupStore();
+    const worktree = makeTempDir();
+    // The verifier role reads the v2 envelope (KTD4); a v1 file would be a
+    // missing result.
+    fs.mkdirSync(path.join(worktree, ".miah"), { recursive: true });
+    fs.writeFileSync(
+      path.join(worktree, ".miah", "envelope-verifier-U1-t2.json"),
+      JSON.stringify({
+        schema_version: 2,
+        producer_role: "verifier",
+        attempt_id: "dispatch-verifier-U1-t2-a1",
+        take: 2,
+        unit_id: "U1",
+        candidate_attempt: "dispatch-builder-U1-t2",
+        candidate_take: 2,
+        evidence_package_sha256: "a".repeat(64),
+        grades: [],
+      }),
+      "utf8",
+    );
+    const adapter = new ScriptedAdapter();
+    const ctx = makeCtx(t, adapter);
+    const result = await harvestEnvelope(
+      ctx,
+      { unit_id: "U1", role: "verifier", take: 2, idempotency_key: "dispatch-verifier-U1-t2-a1", deadline: futureDeadline(t.clock.now) },
+      { agentId: "agent-v", cwd: worktree, workspaceId: "wks_1" },
+      ".miah/envelope-verifier-U1-t2.json",
+    );
+    expect(result.terminatedEvent).toMatchObject({
+      unit_id: "U1",
+      role: "verifier",
+      take: 2,
+      attempt: "dispatch-verifier-U1-t2-a1",
+      agent_id: "agent-v",
+      workspace_id: "wks_1",
+      envelope_rel_path: ".miah/envelope-verifier-U1-t2.json",
+      outcome: "success",
+    });
+    expect(result.envelope).not.toBeNull();
+  });
+});

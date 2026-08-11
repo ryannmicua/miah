@@ -2,7 +2,7 @@
  * U7 grading ladder tests (R28, R47, R48, R74; plan Test Scenarios).
  *
  * Covers the three tiers and their exact semantics: `deterministic` grades
- * pass/fail from verification exit codes; `calibrated-judge` makes a reviewer
+ * pass/fail from verification exit codes; `calibrated-judge` makes a verifier
  * verdict authoritative only when the profile clears the R74 bar, else the
  * verdict is an ungraded input that escalates (R48/R20); `human` is ungraded
  * until the operator decides (R47).
@@ -49,26 +49,35 @@ describe("grading", () => {
     expect(tierMeetsOrExceeds("calibrated-judge", "calibrated-judge")).toBe(true);
   });
 
-  it("deterministic: test pass -> pass, test failure -> fail (R47)", () => {
-    const pass = gradeCriterion({ criterion: "C1", tier: "deterministic", verificationAllPassed: true });
-    expect(pass).toMatchObject({ grade: "pass", route: null, basis: "verification:all-passed" });
-    const fail = gradeCriterion({ criterion: "C1", tier: "deterministic", verificationAllPassed: false });
-    expect(fail).toMatchObject({ grade: "fail", route: "rework", basis: "verification:failed" });
+  it("deterministic: verifier certification pass -> pass, fail -> fail (R47, KD6)", () => {
+    const pass = gradeCriterion({ criterion: "C1", tier: "deterministic", verifierVerdict: "pass" });
+    expect(pass).toMatchObject({ grade: "pass", route: null, basis: "verifier-certified:all-passed" });
+    const fail = gradeCriterion({ criterion: "C1", tier: "deterministic", verifierVerdict: "fail" });
+    expect(fail).toMatchObject({ grade: "fail", route: "rework", basis: "verifier-certified:failed" });
   });
 
-  it("deterministic: no verification evidence is an ungraded input (R52)", () => {
+  it("deterministic: no verifier certification is an ungraded input (R52)", () => {
     const ungraded = gradeCriterion({ criterion: "C1", tier: "deterministic" });
-    expect(ungraded).toMatchObject({ grade: "ungraded", route: "rework", basis: "no-verification-evidence" });
+    expect(ungraded).toMatchObject({ grade: "ungraded", route: "rework", basis: "no-verifier-certification" });
   });
 
-  it("calibrated-judge: a reviewer that is not calibrated -> verdict ungraded -> escalate (R48/R20, audit U7.6)", () => {
+  it("deterministic: a verifier-declared ungraded verdict escalates, never builder rework (KTD4/R48)", () => {
+    const ungraded = gradeCriterion({ criterion: "C1", tier: "deterministic", verifierVerdict: "ungraded" });
+    expect(ungraded).toMatchObject({
+      grade: "ungraded",
+      route: "escalate",
+      basis: "verifier-ungraded: mechanical evidence insufficient",
+    });
+  });
+
+  it("calibrated-judge: a verifier that is not calibrated -> verdict ungraded -> escalate (R48/R20, audit U7.6)", () => {
     const graded = gradeCriterion(
       {
         criterion: "C2",
         tier: "calibrated-judge",
-        reviewerVerdict: "pass",
-        reviewerProvider: "opencode",
-        reviewerModel: "glm-5.2",
+        verifierVerdict: "pass",
+        verifierProvider: "opencode",
+        verifierModel: "glm-5.2",
       },
       { resolveCalibration: resolver(false) },
     );
@@ -80,56 +89,71 @@ describe("grading", () => {
     const graded = gradeCriterion({
       criterion: "C2",
       tier: "calibrated-judge",
-      reviewerVerdict: "pass",
-      reviewerProvider: "opencode",
-      reviewerModel: "glm-5.2",
+      verifierVerdict: "pass",
+      verifierProvider: "opencode",
+      verifierModel: "glm-5.2",
     });
     expect(graded).toMatchObject({ grade: "ungraded", route: "escalate" });
   });
 
-  it("calibrated-judge: a calibrated reviewer's pass verdict is authoritative (R74, audit U7.7)", () => {
+  it("calibrated-judge: a calibrated verifier's pass verdict is authoritative (R74, audit U7.7)", () => {
     const graded = gradeCriterion(
       {
         criterion: "C2",
         tier: "calibrated-judge",
-        reviewerVerdict: "pass",
-        reviewerProvider: "opencode",
-        reviewerModel: "glm-5.2",
+        verifierVerdict: "pass",
+        verifierProvider: "opencode",
+        verifierModel: "glm-5.2",
       },
       { resolveCalibration: resolver(true) },
     );
     expect(graded).toMatchObject({ grade: "pass", route: null });
-    expect(graded.basis).toContain("calibrated-reviewer-verdict");
+    expect(graded.basis).toContain("calibrated-verifier-verdict");
   });
 
-  it("calibrated-judge: a calibrated reviewer's fail verdict is authoritative fail (R74)", () => {
+  it("calibrated-judge: a calibrated verifier's fail verdict is authoritative fail (R74)", () => {
     const graded = gradeCriterion(
       {
         criterion: "C2",
         tier: "calibrated-judge",
-        reviewerVerdict: "fail",
-        reviewerProvider: "opencode",
-        reviewerModel: "glm-5.2",
+        verifierVerdict: "fail",
+        verifierProvider: "opencode",
+        verifierModel: "glm-5.2",
       },
       { resolveCalibration: resolver(true) },
     );
     expect(graded).toMatchObject({ grade: "fail", route: "rework" });
   });
 
-  it("calibrated-judge: a missing reviewer verdict is an ungraded input (missing envelope, R43/R52)", () => {
+  it("calibrated-judge: a missing verifier verdict is an ungraded input (missing envelope, R43/R52)", () => {
     const graded = gradeCriterion({
       criterion: "C2",
       tier: "calibrated-judge",
-      reviewerVerdict: null,
-      reviewerProvider: "opencode",
-      reviewerModel: "glm-5.2",
+      verifierVerdict: null,
+      verifierProvider: "opencode",
+      verifierModel: "glm-5.2",
     });
-    expect(graded).toMatchObject({ grade: "ungraded", route: "rework", basis: expect.stringContaining("no-reviewer-verdict") });
+    expect(graded).toMatchObject({ grade: "ungraded", route: "rework", basis: expect.stringContaining("no-verifier-verdict") });
   });
 
-  it("calibrated-judge: unrecorded reviewer provenance cannot clear the bar (R20)", () => {
+  it("calibrated-judge: a verifier-declared ungraded verdict escalates, never builder rework (KTD4/R48)", () => {
+    const ungraded = gradeCriterion({
+      criterion: "C2",
+      tier: "calibrated-judge",
+      verifierVerdict: "ungraded",
+      verifierProvider: "opencode",
+      verifierModel: "glm-5.2",
+    });
+    expect(ungraded).toMatchObject({
+      grade: "ungraded",
+      route: "escalate",
+      basis: "verifier-ungraded: judgment unavailable",
+    });
+  });
+
+  it("calibrated-judge: unrecorded verifier provenance cannot clear the bar (R20)", () => {
     const graded = gradeCriterion(
-      { criterion: "C2", tier: "calibrated-judge", reviewerVerdict: "pass" },
+      { criterion: "C2", tier: "calibrated-judge", verifierVerdict: "pass" },
       { resolveCalibration: resolver(true) },
     );
     expect(graded).toMatchObject({ grade: "ungraded", route: "escalate", basis: expect.stringContaining("provenance") });

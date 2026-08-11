@@ -6,7 +6,7 @@
  * the unit declared in `creates:` must now exist in the specialist's worktree.
  * A missing declared output is a deterministic mechanical failure (the artifact
  * is not there) — it is recorded as an evidence gap by the evidence layer and
- * blocks acceptance without spending reviewer budget on the more expensive "the
+ * blocks acceptance without spending verifier budget on the more expensive "the
  * artifact is wrong" question (R61).
  *
  * Test code the plan did not declare in `creates:` is never a deliverable

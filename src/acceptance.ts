@@ -24,7 +24,7 @@
 import * as cp from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import type { JournalEvent, OpenGap, PlanUnit } from "./types";
+import type { AcceptanceCriterion, JournalEvent, OpenGap, PlanUnit } from "./types";
 import { tierMeetsOrExceeds, type CriterionGrade } from "./grading";
 import { deliverableFiles } from "./postflight";
 import {
@@ -74,8 +74,25 @@ export interface AcceptanceInput {
 }
 
 /**
- * The acceptance predicate (R47-R51): every criterion needs a passing evidence
- * record at or above its declared tier with no open gap referencing it.
+ * Join a graded record to a criterion (KTD1/KTD4). The stable criterion id is
+ * the authoritative key when the record carries one — every verifier- and
+ * operator-sourced grade does (CriterionGradeRef.criterion_id) — so two
+ * criteria with identical text never merge. Text joins apply only to legacy
+ * id-less criteria (criterion.id === null), which verifier grades omit.
+ */
+function recordMatchesCriterion(record: CriterionGrade, criterion: AcceptanceCriterion): boolean {
+  if (record.criterion_id !== null && record.criterion_id !== undefined) {
+    return criterion.id !== null && criterion.id !== undefined && criterion.id === record.criterion_id;
+  }
+  return (criterion.id === null || criterion.id === undefined) && record.criterion === criterion.text;
+}
+
+/**
+ * The acceptance predicate (R47-R51, R16): every criterion needs a passing
+ * evidence record at or above its declared tier with no open gap referencing
+ * it — except human-tier criteria, which are satisfied ONLY by an operator
+ * grade (a `human`-tier record); the at-or-above-tier substitution never
+ * applies to them (R16, KTD6).
  */
 export function evaluateAcceptance(input: AcceptanceInput): AcceptanceVerdict {
   const { unit, records, openGaps } = input;
@@ -99,19 +116,29 @@ export function evaluateAcceptance(input: AcceptanceInput): AcceptanceVerdict {
         route: "rework",
       };
     }
-    const qualifying = records.filter(
-      (record) =>
-        record.criterion === criterion.text &&
-        record.grade === "pass" &&
-        tierMeetsOrExceeds(record.tier, criterion.tier),
-    );
+    const qualifying = records.filter((record) => {
+      if (!recordMatchesCriterion(record, criterion) || record.grade !== "pass") {
+        return false;
+      }
+      // R16: a human-tier criterion is satisfied only by an operator grade;
+      // a deterministic or calibrated-verifier pass can never substitute.
+      if (criterion.tier === "human") {
+        return record.tier === "human";
+      }
+      return tierMeetsOrExceeds(record.tier, criterion.tier);
+    });
     if (qualifying.length > 0) {
       return { criterion: criterion.text, declaredTier: criterion.tier, pass: true, reason: null, route: null };
     }
-    const forCriterion = records.filter((record) => record.criterion === criterion.text);
-    const escalate = forCriterion.some(
-      (record) => record.grade === "ungraded" && record.route === "escalate",
-    );
+    const forCriterion = records.filter((record) => recordMatchesCriterion(record, criterion));
+    // R16/KTD6: a declared human criterion with no operator grade is awaiting
+    // operator judgment — it escalates even when no record exists yet (the
+    // verifier omits human-tier criteria, KTD4).
+    const escalate =
+      criterion.tier === "human" ||
+      forCriterion.some(
+        (record) => record.grade === "ungraded" && record.route === "escalate",
+      );
     return {
       criterion: criterion.text,
       declaredTier: criterion.tier,
@@ -151,10 +178,15 @@ export interface ApplyAcceptanceResult {
  * Journal an acceptance decision. When the verdict is `not_accepted` and the
  * route is escalation, also appends `escalation_raised` (R82 trigger: no
  * checker profile clears the calibration bar, or operator judgment required).
+ *
+ * KTD7: a declared-human criterion escalates with `missing-access-or-judgment`;
+ * the verifier-flag path (a different trigger with the full payload) is the
+ * caller's job via `escalationOverride`.
  */
 export function applyAcceptance(
   store: RunStore,
   verdict: AcceptanceVerdict,
+  escalationOverride?: { trigger: string; payload: Record<string, unknown> } | null,
 ): ApplyAcceptanceResult {
   const decisionEvent = store.append("acceptance_decision", {
     unit_id: verdict.unit_id,
@@ -170,14 +202,25 @@ export function applyAcceptance(
   let escalationEvent: JournalEvent | null = null;
   if (verdict.decision === "not_accepted" && verdict.route === "escalate") {
     const firstEscalated = verdict.criteria.find((result) => result.route === "escalate");
+    // KTD7: the verifier-flag path supplies its own trigger + payload; the
+    // generic predicate escalation derives its trigger from the criterion tier.
+    let trigger: string;
+    let payload: Record<string, unknown> = {};
+    if (escalationOverride !== undefined && escalationOverride !== null) {
+      trigger = escalationOverride.trigger;
+      payload = escalationOverride.payload;
+    } else {
+      trigger =
+        firstEscalated?.declaredTier === "human"
+          ? "missing-access-or-judgment"
+          : "no-checker-profile-clears-calibration-bar";
+    }
     escalationEvent = store.append("escalation_raised", {
       unit_id: verdict.unit_id,
       criterion: firstEscalated?.criterion ?? null,
       reason: verdict.reason ?? "criterion requires operator judgment",
-      trigger:
-        firstEscalated?.declaredTier === "human"
-          ? "operator-judgment-required"
-          : "no-checker-profile-clears-calibration-bar",
+      trigger,
+      ...payload,
     });
   }
   return { decisionEvent, escalationEvent };
@@ -296,6 +339,13 @@ export async function runIntegrationCheck(input: IntegrationInput): Promise<Inte
 export interface UnitAcceptanceInput extends AcceptanceInput {
   store: RunStore;
   integration: IntegrationInput;
+  /**
+   * KTD7: when the escalate route is caused by a verifier flag, the caller
+   * raises `verifier-flagged-for-human-judgment` itself (with the full
+   * payload) and passes this to suppress the generic escalation; otherwise
+   * null.
+   */
+  escalationOverride?: { trigger: string; payload: Record<string, unknown> } | null;
 }
 
 /** Outcome of the composed acceptance transition. */
@@ -317,7 +367,11 @@ export async function evaluateUnitAcceptance(
 ): Promise<UnitAcceptanceOutcome> {
   const verdict = evaluateAcceptance(input);
   if (verdict.decision !== "accept") {
-    return { verdict, integration: null, applied: applyAcceptance(input.store, verdict) };
+    return {
+      verdict,
+      integration: null,
+      applied: applyAcceptance(input.store, verdict, input.escalationOverride),
+    };
   }
   const integration = await runIntegrationCheck(input.integration);
   if (!integration.ok) {
@@ -326,7 +380,15 @@ export async function evaluateUnitAcceptance(
       records: input.records,
       openGaps: input.store.stateSnapshot().open_gaps,
     });
-    return { verdict: afterGap, integration, applied: applyAcceptance(input.store, afterGap) };
+    return {
+      verdict: afterGap,
+      integration,
+      applied: applyAcceptance(input.store, afterGap, input.escalationOverride),
+    };
   }
-  return { verdict, integration, applied: applyAcceptance(input.store, verdict) };
+  return {
+    verdict,
+    integration,
+    applied: applyAcceptance(input.store, verdict, input.escalationOverride),
+  };
 }

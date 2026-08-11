@@ -21,7 +21,9 @@ import { cleanupTempDirs, fastConfig, makeTempDir } from "./helpers";
 import { createStepRuntime, runStep } from "../src/step";
 import {
   configureTerminalAdapter,
+  defaultVerifierEnvelope,
   makeUnit,
+  passRunner,
   seedBuilderWorktree,
   setupHarness,
   stepContext,
@@ -46,7 +48,11 @@ const V2_PLAN_2UNIT = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/a.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/a.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
   "### U2. Consumer module",
   "",
@@ -55,7 +61,11 @@ const V2_PLAN_2UNIT = [
   "- **inputs:** none",
   "- **depends-on:** U1",
   "- **Acceptance:**",
-  "  - `src/b2.ts` exists and is exported — `tier: deterministic`",
+  "  - U2.AC1. `src/b2.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U2.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -76,7 +86,11 @@ const V2_PLAN_3UNIT = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/a.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/a.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
   "### U2. Consumer module",
   "",
@@ -84,7 +98,11 @@ const V2_PLAN_3UNIT = [
   "- **inputs:** none",
   "- **depends-on:** U1",
   "- **Acceptance:**",
-  "  - `src/b2.ts` exists and is exported — `tier: deterministic`",
+  "  - U2.AC1. `src/b2.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U2.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
   "### U3. Top module",
   "",
@@ -92,7 +110,11 @@ const V2_PLAN_3UNIT = [
   "- **inputs:** none",
   "- **depends-on:** U2",
   "- **Acceptance:**",
-  "  - `src/c.ts` exists and is exported — `tier: deterministic`",
+  "  - U3.AC1. `src/c.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U3.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U3.AC1` -> `U3.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -113,7 +135,11 @@ const BAD_PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/a.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/a.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -176,14 +202,17 @@ describe("amend command", () => {
     writeHarnessManifest(h);
     const v1Snapshot = fs.readFileSync(h.t.layout.planSnapshotPath, "utf8");
 
-    // Drive to AE25's setup: U1 accepted, U2 in-flight.
+    // Drive to AE25's setup: U1 accepted, U2 in-flight (KTD5: the builder
+    // termination step preserves the candidate; the verifier leg runs on the
+    // following steps).
     const runtime = createStepRuntime();
     configureTerminalAdapter(h, { lifecycle: "running", agentId: "agent-u1" });
     await runStepWrapper(h, runtime);
     configureTerminalAdapter(h, { lifecycle: "idle", agentId: "agent-u1" });
-    await runStepWrapper(h, runtime);
+    await runStepWrapper(h, runtime); // builder terminates -> candidate preserved
+    await runStepWrapper(h, runtime); // verifier dispatched + terminates -> U1 accepted
     configureTerminalAdapter(h, { lifecycle: "running", agentId: "agent-u2" });
-    await runStepWrapper(h, runtime);
+    await runStepWrapper(h, runtime); // U2 builder in-flight
 
     let state = h.t.store.replay().state;
     expect(state.units.U1.status).toBe("accepted");
@@ -254,6 +283,8 @@ describe("amend command", () => {
       holderId: "drive-holder",
       config: h.config,
       adapter: h.adapter,
+      runCommand: passRunner,
+      verifierEnvelopeFor: defaultVerifierEnvelope,
       repoRoot: h.repoRoot,
       canonicalWorktree: h.canonicalWorktree,
       now: h.clock.fn,
@@ -264,7 +295,7 @@ describe("amend command", () => {
     expect(afterState.units.U1.status).toBe("accepted");
     const intents = h.t.store.journal
       .readEvents()
-      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+      .filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2");
     expect(intents).toHaveLength(2);
   });
 
@@ -300,6 +331,8 @@ describe("amend command", () => {
       holderId: "drive-holder",
       config: h.config,
       adapter: h.adapter,
+      runCommand: passRunner,
+      verifierEnvelopeFor: defaultVerifierEnvelope,
       repoRoot: h.repoRoot,
       canonicalWorktree: h.canonicalWorktree,
       now: h.clock.fn,
@@ -395,6 +428,8 @@ describe("amend command", () => {
       holderId: "drive-holder",
       config: h.config,
       adapter: h.adapter,
+      runCommand: passRunner,
+      verifierEnvelopeFor: defaultVerifierEnvelope,
       repoRoot: h.repoRoot,
       canonicalWorktree: h.canonicalWorktree,
       now: h.clock.fn,
@@ -436,6 +471,8 @@ describe("amend command", () => {
       holderId: "resume-holder",
       config: h.config,
       adapter: h.adapter,
+      runCommand: passRunner,
+      verifierEnvelopeFor: defaultVerifierEnvelope,
       repoRoot: h.repoRoot,
       canonicalWorktree: h.canonicalWorktree,
       now: h.clock.fn,
@@ -448,13 +485,108 @@ describe("amend command", () => {
     expect(state.units.U1.status).toBe("accepted");
     const intents = h.t.store.journal
       .readEvents()
-      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+      .filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2");
     expect(intents).toHaveLength(2);
     expect(
       h.t.store.journal
         .readEvents()
         .some((e) => e.type === "phase_transition" && e.from === "AwaitingApproval" && e.to === "Ready"),
     ).toBe(true);
+  });
+});
+
+describe("amend contract diff (KTD1, U1.AC3)", () => {
+  it("a contract-only amendment marks its unit affected; an identical normalized contract does not", async () => {
+    // Old plan: U1 and U2, each with a one-command contract.
+    const h = setupHarness({
+      U1: makeUnit("U1", 1, { creates: ["src/a.ts"] }),
+      U2: makeUnit("U2", 2, { dependsOn: ["U1"], creates: ["src/b2.ts"] }),
+    });
+    writeHarnessManifest(h);
+    h.t.store.lease.release(h.holderId);
+
+    // Only U2's contract command string changes: `npm test` -> `npm test -- u2`.
+    const changed = V2_PLAN_2UNIT.replace(
+      "  - **Commands:** `U2.CMD1` = `npm test`",
+      "  - **Commands:** `U2.CMD1` = `npm test -- u2`",
+    );
+    const changedPath = writePlanFile(changed);
+    const amend = await capture(() =>
+      runAmend(h.t.layout.runId, changedPath, {
+        basePath: h.t.basePath,
+        config: h.config,
+        holderId: "amend-holder",
+        workspaceRoot: h.repoRoot,
+      }),
+    );
+    expect(amend.code).toBe(0);
+    const amended = h.t.store.journal
+      .readEvents()
+      .find((e) => e.type === "amendment_applied");
+    expect(amended?.changed_units).toEqual(["U2"]);
+    expect(amended?.affected_units).toEqual(["U2"]);
+
+    // A contract-only criterion-mapping change also marks the unit affected
+    // (deterministic criteria keep >= 1 command, so the remap adds a second).
+    const remapped = V2_PLAN_2UNIT
+      .replace(
+        "  - **Commands:** `U2.CMD1` = `npm test`",
+        "  - **Commands:** `U2.CMD1` = `npm test`; `U2.CMD2` = `npm run build`",
+      )
+      .replace(
+        "  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`",
+        "  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`, `U2.CMD2`",
+      );
+    const remappedPath = writePlanFile(remapped);
+    const amend2 = await capture(() =>
+      runAmend(h.t.layout.runId, remappedPath, {
+        basePath: h.t.basePath,
+        config: h.config,
+        holderId: "amend-holder",
+        workspaceRoot: h.repoRoot,
+      }),
+    );
+    expect(amend2.code).toBe(0);
+    const amended2 = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "amendment_applied")
+      .pop();
+    expect(amended2?.changed_units).toEqual(["U2"]);
+  });
+
+  it("an identical contract with only whitespace/order differences is not a scope change", async () => {
+    const h = setupHarness({
+      U1: makeUnit("U1", 1, { creates: ["src/a.ts"] }),
+      U2: makeUnit("U2", 2, { dependsOn: ["U1"], creates: ["src/b2.ts"] }),
+    });
+    writeHarnessManifest(h);
+    h.t.store.lease.release(h.holderId);
+
+    // Same commands/mappings, different declaration order and spacing.
+    const reordered = V2_PLAN_2UNIT
+      .replace(
+        "  - **Commands:** `U1.CMD1` = `npm test`",
+        "  - **Commands:** `U1.CMD1` =  `npm test`",
+      )
+      .replace(
+        "  - **Commands:** `U2.CMD1` = `npm test`",
+        "  - **Commands:** `U2.CMD1` =  `npm test`",
+      );
+    const reorderedPath = writePlanFile(reordered);
+    const amend = await capture(() =>
+      runAmend(h.t.layout.runId, reorderedPath, {
+        basePath: h.t.basePath,
+        config: h.config,
+        holderId: "amend-holder",
+        workspaceRoot: h.repoRoot,
+      }),
+    );
+    expect(amend.code).toBe(0);
+    const amended = h.t.store.journal
+      .readEvents()
+      .find((e) => e.type === "amendment_applied");
+    expect(amended?.changed_units).toEqual([]);
+    expect(amended?.affected_units).toEqual([]);
   });
 });
 

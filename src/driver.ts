@@ -29,6 +29,7 @@ import {
   createStepRuntime,
   cumulativeUsageFromEvidence,
   findEligibleUnits,
+  hasPendingVerification,
   readUnitsFromStore,
   runStep,
   type StepContext,
@@ -129,6 +130,8 @@ export interface DriverOptions {
   diffRunner?: DiffRunner;
   runCommand?: CommandRunner;
   verificationCommandsFor?: (unit: PlanUnit) => string[];
+  verifierEnvelopeFor?: StepContext["verifierEnvelopeFor"];
+  calibrationBasePath?: string;
   now?: () => number;
 }
 
@@ -329,6 +332,8 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
     diffRunner: opts.diffRunner,
     runCommand: opts.runCommand,
     verificationCommandsFor: opts.verificationCommandsFor,
+    verifierEnvelopeFor: opts.verifierEnvelopeFor,
+    calibrationBasePath: opts.calibrationBasePath,
     now: opts.now,
   };
   const runtime = createStepRuntime();
@@ -421,11 +426,12 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
       const pkgPath = writeApprovalPackage(store);
       return finishResult(store, holderId, "complete", stepsRun, pkgPath);
     }
-    // R66: no executable work remains (nothing in-flight, nothing eligible, not
-    // all accepted) -> escalate -> Attention. A reconcile-only or in-flight step
-    // never counts as blocked.
+    // R66: no executable work remains (nothing in-flight, no awaiting-
+    // verification candidate, nothing eligible, not all accepted) -> escalate
+    // -> Attention. A reconcile-only or in-flight step never counts as blocked.
     if (
       state.in_flight_intents.length === 0 &&
+      !hasPendingVerification(state) &&
       findEligibleUnits(state, runtime.units ?? {}).length === 0
     ) {
       raiseEscalation(store, {

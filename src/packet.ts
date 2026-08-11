@@ -21,14 +21,17 @@ export const PACKET_SCHEMA_VERSION = 1;
 /**
  * Authority bounds a specialist is subject to (R8-R11). The planner is
  * read-only with no code-writing authority; the builder may write only its
- * declared `creates:` paths inside its own worktree; testers/reviewers may not
- * write deliverable code.
+ * declared `creates:` paths inside its own worktree; testers may not write
+ * deliverable code; the verifier is read-only except for its declared `.miah`
+ * result envelope (KTD3/R13).
  */
 export interface AuthorityBounds {
   /** The session is read-only: no writes of files, code, or repo state. */
   read_only: boolean;
   /** Code-writing authority exists for the declared `creates:` paths only. */
   code_writing: boolean;
+  /** The only write the session may perform (beyond read-only). */
+  envelope_only?: boolean;
   scope_change: "prohibited";
   requirement_change: "prohibited";
   acceptance_change: "prohibited";
@@ -41,8 +44,9 @@ export interface AuthorityBounds {
 /** Authority bounds for a role (U5 planner/builder test scenario). */
 export function authorityBoundsFor(role: SpecialistRole): AuthorityBounds {
   return {
-    read_only: role === "planner" || role === "reviewer",
+    read_only: role === "planner" || role === "verifier",
     code_writing: role === "builder",
+    envelope_only: role === "verifier",
     scope_change: "prohibited",
     requirement_change: "prohibited",
     acceptance_change: "prohibited",
@@ -51,6 +55,31 @@ export function authorityBoundsFor(role: SpecialistRole): AuthorityBounds {
     worktree_isolation: "mandatory",
     result_contract: "envelope-at-declared-path",
   };
+}
+
+/**
+ * Verifier packet context (KTD3/KTD4, R13): the frozen candidate identity, the
+ * evidence package location and seal, the criterion IDs to grade, and the
+ * frozen contract summary. The verifier reads the package from its attached
+ * workspace and grades exactly these criteria against the sealed evidence.
+ */
+export interface VerifierPacketContext {
+  /** Package directory relative to the worktree root (`.miah/verifier/...`). */
+  package_path: string;
+  /** The sealed package hash the verifier's v2 envelope must cite (KTD4). */
+  package_sha256: string;
+  /** The frozen builder attempt this verifier grades (KTD5). */
+  candidate_attempt: string;
+  /** The frozen builder take this verifier grades (KTD5). */
+  candidate_take: number;
+  /** The observed builder workspace id (KTD3). */
+  workspace_id: string | null;
+  /** Criterion IDs with declared tiers, in plan order (KTD1). */
+  criteria: Array<{ id: string | null; text: string; tier: string | null }>;
+  /** The frozen contract commands (R15). */
+  contract_commands: Array<{ id: string; command: string }>;
+  /** Human-readable criterion -> commands summary. */
+  contract_summary: string;
 }
 
 /** The dispatch packet a specialist receives (R36). */
@@ -73,6 +102,8 @@ export interface DispatchPacket {
   result_envelope_path: string;
   provider: string;
   model: string;
+  /** Verifier-only: package, candidate, criteria, and contract context (KTD3). */
+  verifier_context?: VerifierPacketContext;
 }
 
 export interface ComposePacketInput {
@@ -85,6 +116,8 @@ export interface ComposePacketInput {
   deadline: string;
   provider: string;
   model: string;
+  /** Verifier-only packet context (KTD3/KTD4). */
+  verifier?: VerifierPacketContext;
 }
 
 /** Compose the dispatch packet from the unit's units.json entry (R24, R36). */
@@ -106,6 +139,7 @@ export function composePacket(input: ComposePacketInput): DispatchPacket {
     result_envelope_path: input.envelopePath,
     provider: input.provider,
     model: input.model,
+    ...(input.verifier !== undefined ? { verifier_context: input.verifier } : {}),
   };
 }
 
@@ -136,16 +170,30 @@ export function computePacketHash(packet: DispatchPacket): string {
   return computeContentHash(canonicalJson(packet));
 }
 
+/**
+ * The output-authority line for the packet prompt: the envelope-only mode
+ * (verifier) outranks code-writing authority (builder).
+ */
+function outputAuthorityLine(
+  bounds: DispatchPacket["authority_bounds"],
+  packet: DispatchPacket,
+): string {
+  if (bounds.envelope_only === true) {
+    return `- Output authority: the ONLY write you may perform is your result envelope at \`${packet.result_envelope_path}\`; every other write is prohibited.`;
+  }
+  if (bounds.code_writing) {
+    return "- You have code-writing authority ONLY for the declared `creates:` paths inside your worktree.";
+  }
+  return "- You have NO code-writing authority.";
+}
+
 /** Render the packet as the prompt handed to the adapter launch (R8-R9). */
 export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): string {
-  const bounds = packet.authority_bounds;
-  const authorityLines = [
+  const bounds = packet.authority_bounds;  const authorityLines = [
     bounds.read_only
       ? "- This session is READ-ONLY: you may not write files, code, or change repository state."
       : "- You may write ONLY inside your own dedicated worktree (worktree isolation is mandatory).",
-    bounds.code_writing
-      ? "- You have code-writing authority ONLY for the declared `creates:` paths inside your worktree."
-      : "- You have NO code-writing authority.",
+    outputAuthorityLine(bounds, packet),
     "- The plan snapshot is immutable: changing scope, requirements, or acceptance criteria is prohibited.",
     "- Recursively creating other agents is prohibited.",
     "- Writing to the Miah run store is prohibited.",
@@ -159,6 +207,36 @@ export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): 
     packet.inputs.length > 0
       ? packet.inputs.map((entry) => `- \`${entry}\``).join("\n")
       : "- none";
+
+  const verifierLines: string[] = [];
+  if (packet.verifier_context !== undefined) {
+    const context = packet.verifier_context;
+    verifierLines.push(
+      "",
+      "## Verification task (verifier)",
+      "",
+      "- You grade the frozen builder candidate for this unit against the evidence package.",
+      `- Evidence package directory (relative to your worktree root): \`${context.package_path}\` — read it; do not modify it.`,
+      `- Evidence package SHA-256 (cite it verbatim in your envelope): \`${context.package_sha256}\``,
+      `- Frozen candidate: builder attempt \`${context.candidate_attempt}\`, take ${context.candidate_take}${context.workspace_id !== null ? `, workspace \`${context.workspace_id}\`` : ""}.`,
+      "",
+      "- Grade EXACTLY these acceptance criteria (stable IDs, declared tiers):",
+      ...context.criteria.map(
+        (criterion) => `  - ${criterion.id ?? "(no id)"} [${criterion.tier ?? "undeclared"}]: ${criterion.text}`,
+      ),
+      "",
+      "- Frozen verification contract (commands Miah already ran as the sensor; you grade their harvested evidence, you never run them):",
+      ...context.contract_commands.map((command) => `  - ${command.id}: \`${command.command}\``),
+      "",
+      `- Criterion -> command mapping: ${context.contract_summary}`,
+      "- Every grade entry: one per criterion, verdict from pass|fail|ungraded, non-empty basis, evidence pointers that resolve to package artifacts whose SHA-256 appears in the custody slice.",
+      "- Deterministic criteria: certify from the harvested mechanical evidence (commands all-passed, evidence genuine and complete).",
+      "- Judgment criteria: judge from the evidence; your grade carries authority only through the calibration gate Miah applies.",
+      "- If a criterion needs human judgment, set flagged_for_human: true instead of forcing a verdict.",
+      "- Human-tier criteria are graded by the operator: omit them from your envelope.",
+    );
+  }
+
   return [
     "# Miah Dispatch Packet (v1)",
     "",
@@ -186,6 +264,7 @@ export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): 
     "```json",
     JSON.stringify(packet.output_schema, null, 2),
     "```",
+    ...verifierLines,
     "",
     "## Plan snapshot excerpt",
     packet.plan_excerpt,
@@ -195,7 +274,7 @@ export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): 
 
 /**
  * Extract the raw `### U<n>. <title>` section of a plan for a unit — the plan
- * excerpt a builder/tester/reviewer receives (R9). Returns null when the unit
+ * excerpt a builder/tester/verifier receives (R9). Returns null when the unit
  * heading is absent. The planner receives the full immutable snapshot instead
  * (R8), so dispatch does not call this for the planner role.
  */

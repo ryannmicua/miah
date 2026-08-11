@@ -24,9 +24,9 @@ The CLI resolution is Windows-aware (npm `.cmd` shims are resolved to `node <scr
 
 ## The dispatch packet: the contract a specialist receives
 
-Before any adapter call, Miah composes a **dispatch packet** from the unit's `units.json` entry plus the dispatch's role, take, deadline, and idempotency key (`src/dispatch.ts:327-338`, `src/packet.ts:91-110`). The packet carries: the objective, the immutable plan excerpt (builders/testers/reviewers get their unit's section; the planner gets the full snapshot, `PLAN:R8`), the result-envelope output schema, the authority bounds, the `creates:`/`inputs:` declarations, the declared envelope path, and the provider/model.
+Before any adapter call, Miah composes a **dispatch packet** from the unit's `units.json` entry plus the dispatch's role, take, deadline, and idempotency key (`src/dispatch.ts`, `src/packet.ts`). The packet carries: the objective, the immutable plan excerpt (builders/testers/verifiers get their unit's section; the planner gets the full snapshot, `PLAN:R8`), the result-envelope output schema, the authority bounds, the `creates:`/`inputs:` declarations, the declared envelope path, and the provider/model. The verifier packet additionally carries the evidence-package path and hash, the frozen candidate identity, and the criteria to grade (KTD3/KTD4).
 
-The authority bounds are the packet's load-bearing part (`src/packet.ts:27-54`): planners and reviewers are read-only, builders may write only their declared `creates:` paths, and scope/requirement/acceptance change, recursive workers, and run-store writes are all `prohibited`. These are rendered into the prompt handed to the specialist (`src/packet.ts:140-193`).
+The authority bounds are the packet's load-bearing part (`src/packet.ts`): planners and verifiers are read-only (the verifier may write only its declared result envelope), builders may write only their declared `creates:` paths, and scope/requirement/acceptance change, recursive workers, and run-store writes are all `prohibited`. These are rendered into the prompt handed to the specialist.
 
 The packet is content-hashed (canonical JSON → SHA-256) and that hash goes into the journaled `dispatch_intent` (`src/packet.ts:135-137`, `src/dispatch.ts:341-351`), so the journal records exactly what was sent.
 
@@ -78,7 +78,7 @@ The workspace policy is read from the run's admission-time config snapshot (R80)
 
 ## Role resolution and cross-family contrast
 
-Each role maps to a Paseo role plus a provider/model pair: D8-i defaults (`src/types.ts:312-320`) overridden by the operator's `~/.paseo/orchestration-preferences.json` when present (`src/dispatch.ts:242-280`). The defaults pin the builder to one model family and testers/reviewers to another — cross-family contrast per unit (builder ≠ checker). Cross-family is a hedge, not an authority: a checker's verdict earns authority only by clearing the calibration bar (see [evidence-and-acceptance](./evidence-and-acceptance.md) §Grading; [cross-family-verifier-audit-g-criteria pattern](../../docs/solutions/patterns/cross-family-verifier-audit-g-criteria.md)).
+Each role maps to a Paseo role plus a provider/model pair: D8-i defaults (`src/types.ts`) overridden by the operator's `~/.paseo/orchestration-preferences.json` when present (`src/dispatch.ts`). The defaults pin the builder to one model family and testers/verifiers to another — cross-family contrast per unit (builder ≠ checker). Cross-family is a hedge, not an authority: a checker's verdict earns authority only by clearing the calibration bar (see [evidence-and-acceptance](./evidence-and-acceptance.md) §Grading; [cross-family-verifier-audit-g-criteria pattern](../../docs/solutions/patterns/cross-family-verifier-audit-g-criteria.md)).
 
 ## The step-level dispatch loop
 

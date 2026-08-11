@@ -11,7 +11,15 @@
  * performs no I/O and holds no run state.
  */
 import { parse as parseYaml } from "yaml";
-import { AcceptanceCriterion, ParsedPlan, PlanUnit, UnitId } from "./types";
+import {
+  AcceptanceCriterion,
+  CriterionMapping,
+  ParsedPlan,
+  PlanUnit,
+  UnitId,
+  VerificationCommand,
+  VerificationContract,
+} from "./types";
 
 /** Marker for a root unit's dependency list (R25: empty for roots). */
 const NONE_TOKEN = "none";
@@ -101,6 +109,7 @@ function parseUnitSection(lines: string[], id: UnitId, number: number, title: st
   let inputs: string[] | null = null;
   let dependsOn: UnitId[] = [];
   let acceptance: AcceptanceCriterion[] | null = null;
+  let verificationContract: VerificationContract | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -144,12 +153,29 @@ function parseUnitSection(lines: string[], id: UnitId, number: number, title: st
         i = j - 1;
         break;
       }
+      case "verification contract": {
+        const parsed = parseVerificationContract(lines, i + 1);
+        verificationContract = parsed.contract;
+        i = parsed.nextIndex - 1;
+        break;
+      }
       default:
         break;
     }
   }
 
-  return { id, number, title, goal, requirements, creates, inputs, dependsOn, acceptance };
+  return {
+    id,
+    number,
+    title,
+    goal,
+    requirements,
+    creates,
+    inputs,
+    dependsOn,
+    acceptance,
+    verificationContract,
+  };
 }
 
 /**
@@ -159,15 +185,129 @@ function parseUnitSection(lines: string[], id: UnitId, number: number, title: st
  */
 const TIER_PATTERN = /(?:[–—-]\s*)?`?tier\s*[:=]\s*`?([A-Za-z][A-Za-z-]*)`?$/i;
 
+/**
+ * Explicit stable criterion ID prefix, e.g. `U1.AC1. ` (KTD1). Only this
+ * `U<num>.AC<num>.` shape is treated as an ID; anything else leaves `id`
+ * null and the criterion unmapped.
+ */
+const CRITERION_ID_PATTERN = /^U(\d+)\.AC(\d+)\s*[.:]\s+/i;
+
 /** Parse a tier: marker off an acceptance criterion's text (R28, R47). */
 export function parseCriterion(text: string): AcceptanceCriterion {
-  const tierMatch = text.match(TIER_PATTERN);
+  const idMatch = text.match(CRITERION_ID_PATTERN);
+  const id = idMatch !== null ? `U${idMatch[1]}.AC${idMatch[2]}` : null;
+  const withoutId = idMatch !== null ? text.slice(idMatch[0].length) : text;
+  const tierMatch = withoutId.match(TIER_PATTERN);
   if (!tierMatch) {
-    return { text, tier: null };
+    return { id, text: withoutId, tier: null };
   }
   const tier = tierMatch[1].toLowerCase();
-  const withoutTier = text.replace(tierMatch[0], "").trim();
-  return { text: withoutTier || text, tier };
+  const withoutTier = withoutId.replace(tierMatch[0], "").trim();
+  return { id, text: withoutTier || withoutId, tier };
+}
+
+/** An indented sub-field bullet inside the Verification Contract block. */
+const CONTRACT_SUBFIELD_PATTERN = /^\s+-\s+\*\*(.+?):\*\*\s*(.*)$/;
+
+/** One or more `` `ID` = `command` `` pairs on a Commands line (KTD1). */
+const COMMAND_PAIR_PATTERN = /`([^`]+)`\s*=\s*`([^`]+)`/g;
+
+/** A `` `criterion` -> commands... `` chunk on a Criterion mapping line. */
+const MAPPING_CHUNK_PATTERN = /`([^`]+)`\s*->\s*(.*)$/;
+
+/** A backtick-quoted token (command IDs in a mapping, sources in evidence). */
+const BACKTICK_TOKEN_PATTERN = /`([^`]+)`/g;
+
+/** Parse the command pairs from a Commands line value. */
+function parseCommandPairs(value: string): VerificationCommand[] {
+  const commands: VerificationCommand[] = [];
+  for (const match of value.matchAll(COMMAND_PAIR_PATTERN)) {
+    commands.push({ id: match[1].trim(), command: match[2].trim() });
+  }
+  return commands;
+}
+
+/** Parse `critId -> cmd1, cmd2` chunks from a Criterion mapping line value. */
+function parseCriterionMappings(value: string): Record<string, CriterionMapping> {
+  const criterionMap: Record<string, CriterionMapping> = {};
+  for (const chunk of value.split(";")) {
+    const match = chunk.trim().match(MAPPING_CHUNK_PATTERN);
+    if (match === null) {
+      continue;
+    }
+    const criterionId = match[1].trim();
+    const commandIds: string[] = [];
+    for (const token of match[2].matchAll(BACKTICK_TOKEN_PATTERN)) {
+      commandIds.push(token[1].trim());
+    }
+    criterionMap[criterionId] = {
+      commands: commandIds,
+      evidence_sources: [],
+    };
+  }
+  return criterionMap;
+}
+
+/** Parse named evidence sources from an Evidence sources line value. */
+function parseEvidenceSources(value: string): string[] {
+  const sources: string[] = [];
+  for (const token of value.replace(/`/g, "").split(/[,;]/)) {
+    const trimmed = token.trim();
+    if (trimmed.length > 0) {
+      sources.push(trimmed);
+    }
+  }
+  return sources;
+}
+
+/**
+ * Parse a unit's `Verification Contract` block (KTD1): the indented
+ * `Commands`, `Criterion mapping`, and `Evidence sources` sub-bullets that
+ * follow the field bullet. Returns the parsed contract and the index of the
+ * first line after the block.
+ *
+ * An empty block (declared but with no parseable sub-bullets) yields an
+ * empty contract `{commands: [], criterion_map: {}}` so preflight reports
+ * `zero-verification-commands` rather than a missing block.
+ */
+function parseVerificationContract(
+  lines: string[],
+  start: number,
+): { contract: VerificationContract; nextIndex: number } {
+  let commands: VerificationCommand[] = [];
+  let criterionMap: Record<string, CriterionMapping> = {};
+  let evidenceSources: string[] = [];
+
+  let i = start;
+  for (; i < lines.length; i++) {
+    const sub = lines[i].match(CONTRACT_SUBFIELD_PATTERN);
+    if (sub === null) {
+      break;
+    }
+    const name = sub[1].trim().toLowerCase();
+    const value = sub[2].trim();
+    switch (name) {
+      case "commands":
+        commands = parseCommandPairs(value);
+        break;
+      case "criterion mapping":
+        criterionMap = parseCriterionMappings(value);
+        break;
+      case "evidence sources":
+        evidenceSources = parseEvidenceSources(value);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Named evidence sources are unit-level and copied onto every criterion
+  // mapping (KTD1: maps every criterion ID to commands plus named sources).
+  for (const mapping of Object.values(criterionMap)) {
+    mapping.evidence_sources = [...evidenceSources];
+  }
+
+  return { contract: { commands, criterion_map: criterionMap }, nextIndex: i };
 }
 
 /**

@@ -173,10 +173,10 @@ describe("journal", () => {
     // Derived state only (R41, D7-a): statuses/ids/phase — the raw payload field
     // `raw_context` must never be stored.
     expect(Object.keys(snapshot).sort()).toEqual(
-      ["in_flight_intents", "open_gaps", "phase", "plan_hash", "run_id", "seq", "terminal", "units"].sort(),
+      ["awaiting_verification", "criterion_grades", "in_flight_intents", "open_gaps", "phase", "plan_hash", "run_id", "seq", "terminal", "units"],
     );
     expect(Object.keys(snapshot.units.U1).sort()).toEqual(
-      ["last_acceptance", "rework_cycles", "status", "takes"].sort(),
+      ["last_acceptance", "rework_cycles", "status", "takes", "verifier_attempts"].sort(),
     );
     expect(JSON.stringify(snapshot)).not.toContain("RAW-SPECIALIST-PROSE");
   });
