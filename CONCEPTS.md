@@ -22,6 +22,8 @@
 
 **Verifier** — The specialist role that grades every acceptance criterion — deterministic and judgment — against the harvested evidence. Deterministic criteria are certified from the mechanical contract results (no calibration authority needed); judgment grades carry authority only when the verifier's profile clears the calibration bar. The operator grades criteria declared `human` tier or flagged by the verifier (VISION steps 5-7; `docs/plans/2026-08-09-001-feat-independent-verifier-role-plan.md`). Merged the former reviewer role; Miah runs the checks (sensor) but never grades.
 
+**Verifier verdict** — The verifier's per-criterion grade, one of exactly three values: `pass`, `fail`, or `ungraded` (`ungraded` means the verifier cannot decide — mechanical evidence insufficient, or judgment unavailable). `ungraded` is a first-class, authority-respecting declaration: it escalates to the operator, never starts builder rework — rework on an ungraded verdict burns a builder take on a candidate nobody graded. `ungraded` is distinct from a missing envelope entry, which is treated as a failed verifier attempt and retried. *Avoid:* reviewer verdict (the pre-merge role's name for the same grade).
+
 **Verification contract** — The frozen per-unit checks a unit's work is graded against: drafted by the planner at plan-prep, operator-approved with the plan, riding in the immutable snapshot. A unit without one fails admission; changing one mid-run is a scope change requiring operator approval (VISION step 2).
 
 ## Gaps and evidence
