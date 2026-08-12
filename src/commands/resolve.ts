@@ -246,20 +246,30 @@ async function reEvaluateUnit(
     ? opts.verificationCommandsFor(unit)
     : contractVerificationCommandsFor(unit);
   const canonicalWorktree = opts.canonicalWorktree ?? opts.workspaceRoot ?? process.cwd();
+  // R54/R89: the integration check needs the builder candidate's worktree as
+  // its source. When no worktree can be recovered and the unit declares
+  // `creates:`, skip the integration check rather than let runIntegrationCheck
+  // resolve paths relative to the process CWD (pre-PR behavior: the acceptance
+  // stands but the deliverable is not integrated; the durable operator grade
+  // and predicate evaluation still run).
+  const integration =
+    worktreeRoot === "" && (unit.creates ?? []).length > 0
+      ? null
+      : {
+          store,
+          unit,
+          sourceWorktree: worktreeRoot,
+          canonicalWorktree,
+          verificationCommands,
+          runCommand: opts.runCommand,
+          commitIntegration: commitIntegrationFiles,
+        };
   const outcome = await evaluateUnitAcceptance({
     store,
     unit,
     records,
     openGaps: state.open_gaps,
-    integration: {
-      store,
-      unit,
-      sourceWorktree: worktreeRoot,
-      canonicalWorktree,
-      verificationCommands,
-      runCommand: opts.runCommand,
-      commitIntegration: commitIntegrationFiles,
-    },
+    integration,
   });
   if (outcome.verdict.decision === "accept") {
     return;

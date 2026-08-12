@@ -722,6 +722,18 @@ describe("resolve command", () => {
       criterion: "`src/hello.ts` exists and is exported",
       payload: { criterion_id: "U1.AC1", declared_tier: "deterministic" },
     });
+    // D1 (resolve-time integration safety): the integration check needs a
+    // recoverable builder worktree as its source; journal the builder dispatch
+    // so builderCandidateWorktree recovers this worktree (otherwise integration
+    // is skipped and the contract commands below never run).
+    store.append("dispatch_created", {
+      unit_id: "U1",
+      role: "builder",
+      take: 1,
+      attempt: "k1",
+      agent_id: "agent-builder",
+      workspace_id: "wks-builder",
+    });
     ensurePhase(store, "Attention");
     store.lease.release(run.holderId);
 

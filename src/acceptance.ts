@@ -338,7 +338,13 @@ export async function runIntegrationCheck(input: IntegrationInput): Promise<Inte
 /** Input to the composed acceptance transition (R51 + R54). */
 export interface UnitAcceptanceInput extends AcceptanceInput {
   store: RunStore;
-  integration: IntegrationInput;
+  /**
+   * The integration self-containedness check (R54) input. Optional: when no
+   * source worktree is recoverable (resolve-time re-evaluation), the check is
+   * skipped and the acceptance predicate alone decides (pre-PR behavior: the
+   * acceptance stands but the deliverable is not integrated).
+   */
+  integration?: IntegrationInput | null;
   /**
    * KTD7: when the escalate route is caused by a verifier flag, the caller
    * raises `verifier-flagged-for-human-judgment` itself (with the full
@@ -351,7 +357,11 @@ export interface UnitAcceptanceInput extends AcceptanceInput {
 /** Outcome of the composed acceptance transition. */
 export interface UnitAcceptanceOutcome {
   verdict: AcceptanceVerdict;
-  /** Null when the criteria predicate already rejected the unit (R54 runs only on the acceptance transition). */
+  /**
+   * The integration outcome, or null when the criteria predicate already
+   * rejected the unit or the integration check was skipped (R54 runs only on
+   * the acceptance transition).
+   */
   integration: IntegrationOutcome | null;
   applied: ApplyAcceptanceResult;
 }
@@ -367,6 +377,15 @@ export async function evaluateUnitAcceptance(
 ): Promise<UnitAcceptanceOutcome> {
   const verdict = evaluateAcceptance(input);
   if (verdict.decision !== "accept") {
+    return {
+      verdict,
+      integration: null,
+      applied: applyAcceptance(input.store, verdict, input.escalationOverride),
+    };
+  }
+  if (input.integration === undefined || input.integration === null) {
+    // R54 skipped (no recoverable source worktree, resolve-time): the
+    // acceptance predicate alone decides; no smuggle gap can be evaluated.
     return {
       verdict,
       integration: null,
