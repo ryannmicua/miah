@@ -4,7 +4,7 @@
 
 ## What Miah is (one paragraph)
 
-Miah is a **resumable plan supervisor** CLI. It directs one approved plan at a time from executable plan to verified completion: it validates the plan, locks it to an immutable snapshot, hands each unit to an independently dispatched specialist agent (builder), runs completed work past an independent verifier specialist, grades the harvested evidence against tiered acceptance criteria, and refuses to call a step done until the criteria pass — or you sign off. Every decision, dispatch, and transition is appended to a durable journal, so a crashed session never loses progress: the next `miah run` picks up exactly where the last one left off. Miah itself never implements, tests, or verifies grades — it orchestrates, journals, senses, custody-chains evidence, and gates.
+Miah is a **resumable plan supervisor** CLI. It directs one approved plan at a time from executable plan to verified completion: it validates the plan, locks it to an immutable snapshot, hands each unit to an independently dispatched specialist agent (builder), runs completed work past an independent verifier specialist who grades the harvested evidence against tiered acceptance criteria, and refuses to call a step done until the criteria pass — or you sign off. Every decision, dispatch, and transition is appended to a durable journal, so a crashed session never loses progress: the next `miah run` picks up exactly where the last one left off. Miah itself never implements, tests, or verifies grades — it orchestrates, journals, senses, custody-chains evidence, and gates.
 
 Sources: [`VISION.md`](./VISION.md), [`README.md`](./README.md), [`docs/architecture/system-overview.md`](./docs/architecture/system-overview.md).
 

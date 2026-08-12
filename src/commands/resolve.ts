@@ -50,6 +50,8 @@ export interface ResolveOptions {
   config?: Config;
   basePath?: string;
   holderId?: string;
+  /** The workspace the resolve runs against; defaults to the process cwd. */
+  workspaceRoot?: string;
   /** Canonical worktree the approved unit's `creates:` integrate into (R89). */
   canonicalWorktree?: string;
   /** Verification-contract commands per unit (R45); defaults to the parsed contract (KTD1/R15). */
@@ -243,6 +245,7 @@ async function reEvaluateUnit(
   const verificationCommands = opts.verificationCommandsFor
     ? opts.verificationCommandsFor(unit)
     : contractVerificationCommandsFor(unit);
+  const canonicalWorktree = opts.canonicalWorktree ?? opts.workspaceRoot ?? process.cwd();
   const outcome = await evaluateUnitAcceptance({
     store,
     unit,
@@ -252,7 +255,7 @@ async function reEvaluateUnit(
       store,
       unit,
       sourceWorktree: worktreeRoot,
-      canonicalWorktree: opts.canonicalWorktree ?? "",
+      canonicalWorktree,
       verificationCommands,
       runCommand: opts.runCommand,
       commitIntegration: commitIntegrationFiles,

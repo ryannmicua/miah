@@ -190,9 +190,11 @@ function outputAuthorityLine(
 /** Render the packet as the prompt handed to the adapter launch (R8-R9). */
 export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): string {
   const bounds = packet.authority_bounds;  const authorityLines = [
-    bounds.read_only
-      ? "- This session is READ-ONLY: you may not write files, code, or change repository state."
-      : "- You may write ONLY inside your own dedicated worktree (worktree isolation is mandatory).",
+    bounds.envelope_only === true
+      ? "- This session is READ-ONLY except for the result envelope write below: you may not write any other files, code, or change repository state."
+      : bounds.read_only
+        ? "- This session is READ-ONLY: you may not write files, code, or change repository state."
+        : "- You may write ONLY inside your own dedicated worktree (worktree isolation is mandatory).",
     outputAuthorityLine(bounds, packet),
     "- The plan snapshot is immutable: changing scope, requirements, or acceptance criteria is prohibited.",
     "- Recursively creating other agents is prohibited.",
