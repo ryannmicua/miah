@@ -69,7 +69,7 @@ describe("acceptance", () => {
     expect(verdict.route).toBeNull();
     expect(verdict.reason).toBeNull();
     expect(verdict.criteria).toEqual([
-      { criterion: "criterion-a", declaredTier: "deterministic", pass: true, reason: null, route: null },
+      { criterion_id: null, criterion: "criterion-a", declaredTier: "deterministic", pass: true, reason: null, route: null },
     ]);
   });
 
@@ -104,13 +104,34 @@ describe("acceptance", () => {
     expect(verdict.route).toBe("rework");
   });
 
-  it("one criterion at calibrated-judge with an uncalibrated reviewer -> verdict ungraded -> escalate (R48/R20)", () => {
+  it("two criteria with identical text but different IDs join grades by criterion id, not text (KTD1/KTD4)", () => {
+    const verdict = evaluateAcceptance({
+      unit: unit([
+        { id: "U1.AC1", text: "same wording", tier: "deterministic" },
+        { id: "U1.AC2", text: "same wording", tier: "deterministic" },
+      ]),
+      // Both records carry the same display text but different stable ids:
+      // the pass on AC1 must never satisfy AC2, and the fail on AC2 must not
+      // pollute AC1.
+      records: [
+        pass({ criterion_id: "U1.AC1", criterion: "same wording", basis: "verifier-certified:all-passed" }),
+        pass({ criterion_id: "U1.AC2", criterion: "same wording", grade: "fail", route: "rework", basis: "verifier-certified:failed" }),
+      ],
+      openGaps: [],
+    });
+    expect(verdict.decision).toBe("not_accepted");
+    expect(verdict.route).toBe("rework");
+    expect(verdict.criteria[0]).toMatchObject({ pass: true, reason: null });
+    expect(verdict.criteria[1]).toMatchObject({ pass: false, reason: "no qualifying pass at or above declared tier" });
+  });
+
+  it("one criterion at calibrated-judge with an uncalibrated verifier -> verdict ungraded -> escalate (R48/R20)", () => {
     const ungraded = gradeCriterion({
       criterion: "criterion-b",
       tier: "calibrated-judge",
-      reviewerVerdict: "pass",
-      reviewerProvider: "opencode",
-      reviewerModel: "glm-5.2",
+      verifierVerdict: "pass",
+      verifierProvider: "opencode",
+      verifierModel: "glm-5.2",
     });
     const verdict = evaluateAcceptance({
       unit: unit([CJ_B]),
@@ -123,9 +144,9 @@ describe("acceptance", () => {
     expect(verdict.reason).toContain("ungraded");
   });
 
-  it("one criterion at calibrated-judge with a calibrated reviewer -> verdict authoritative -> accept if pass (R74)", () => {
+  it("one criterion at calibrated-judge with a calibrated verifier -> verdict authoritative -> accept if pass (R74)", () => {
     const t = setupStore();
-    // A reviewer profile that clears the R74 bar.
+    // A verifier profile that clears the R74 bar.
     const file = `${t.basePath}/calibration/opencode-glm-5.2.json`;
     fs.mkdirSync(`${t.basePath}/calibration`, { recursive: true });
     fs.writeFileSync(
@@ -144,9 +165,9 @@ describe("acceptance", () => {
       {
         criterion: "criterion-b",
         tier: "calibrated-judge",
-        reviewerVerdict: "pass",
-        reviewerProvider: "opencode",
-        reviewerModel: "glm-5.2",
+        verifierVerdict: "pass",
+        verifierProvider: "opencode",
+        verifierModel: "glm-5.2",
       },
       {
         resolveCalibration: (provider, model, tier) =>
@@ -222,9 +243,9 @@ describe("acceptance", () => {
     const ungraded = gradeCriterion({
       criterion: "criterion-b",
       tier: "calibrated-judge",
-      reviewerVerdict: "pass",
-      reviewerProvider: "opencode",
-      reviewerModel: "glm-5.2",
+      verifierVerdict: "pass",
+      verifierProvider: "opencode",
+      verifierModel: "glm-5.2",
     });
     const verdict = evaluateAcceptance({ unit: unit([CJ_B]), records: [ungraded], openGaps: [] });
     const applied = applyAcceptance(t.store, verdict);
@@ -232,6 +253,35 @@ describe("acceptance", () => {
     expect(applied.escalationEvent).toMatchObject({
       type: "escalation_raised",
       unit_id: "U1",
+      trigger: "no-checker-profile-clears-calibration-bar",
+    });
+  });
+
+  it("KTD7: an escalation on one of two identical-text criteria carries that criterion's id in the payload", () => {
+    const t = setupStore();
+    const verdict = evaluateAcceptance({
+      unit: unit([
+        { id: "U1.AC1", text: "same wording", tier: "calibrated-judge" },
+        { id: "U1.AC2", text: "same wording", tier: "calibrated-judge" },
+      ]),
+      // AC1 passed; AC2 is ungraded/escalate — the predicate escalates AC2,
+      // whose display text is identical to AC1's. Text alone cannot tell them
+      // apart; the escalation must carry AC2's stable id (KTD1).
+      records: [
+        { criterion_id: "U1.AC1", criterion: "same wording", tier: "calibrated-judge", grade: "pass", route: null, basis: "verifier-certified:all-passed" },
+        { criterion_id: "U1.AC2", criterion: "same wording", tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "verifier-not-calibrated" },
+      ],
+      openGaps: [],
+    });
+    expect(verdict.route).toBe("escalate");
+    const escalated = verdict.criteria.find((result) => result.route === "escalate");
+    expect(escalated?.criterion).toBe("same wording");
+    expect(escalated?.criterion_id).toBe("U1.AC2");
+    const applied = applyAcceptance(t.store, verdict);
+    expect(applied.escalationEvent).toMatchObject({
+      type: "escalation_raised",
+      criterion: "same wording",
+      criterion_id: "U1.AC2",
       trigger: "no-checker-profile-clears-calibration-bar",
     });
   });

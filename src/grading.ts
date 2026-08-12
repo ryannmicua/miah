@@ -3,22 +3,27 @@
  * verdict for one acceptance criterion.
  *
  * Tiers, highest authority first: `deterministic` (test/exit-code/schema/file/
- * hash bits — a mechanical pass, R47), `calibrated-judge` (a reviewer verdict
+ * hash bits — a mechanical pass, R47), `calibrated-judge` (a verifier verdict
  * that gains acceptance authority ONLY when its calibration profile clears the
  * R74 bar — the pass is operator-assisted, never granted by family membership,
  * R47/R48), and `human` (operator judgment, the natural fallback, R47).
  *
  * A criterion is graded `pass` / `fail` / `ungraded`. An `ungraded` verdict
  * carries no acceptance authority: the calibrated-judge tier escalates when no
- * profile clears the bar (R48/R20), and the human tier escalates until
- * `miah resolve` (U9) supplies an operator decision.
+ * profile clears the bar (R48/R20), and the human tier escalates until the
+ * operator supplies a decision.
+ *
+ * Grade sources (KTD6): Miah never creates a grade. The inputs here are the
+ * verifier's envelope entries (KD1) and operator decisions (KD4); grading maps
+ * those inputs through the ladder and applies the calibration authority gate.
  *
  * The `tier` field on each graded record is the tier the evidence actually
  * occupied; the acceptance predicate compares it against each criterion's
- * declared tier ("pass at or above the declared tier", R47/R51).
+ * declared tier ("pass at or above the declared tier", R47/R51 — except that
+ * human-tier criteria are satisfied only by an operator grade, R16).
  */
 import type { CalibrationMetrics } from "./calibration";
-import { GRADING_TIERS, type GradingTier } from "./types";
+import { GRADING_TIERS, type CriterionGradeRef, type GradingTier } from "./types";
 
 /** Authority rank per tier: higher rank satisfies a criterion declared at any lower-or-equal rank. */
 export const TIER_RANK: Record<string, number> = {
@@ -51,6 +56,8 @@ export type GradeRoute = "escalate" | "rework" | null;
 
 /** The outcome of grading one acceptance criterion. */
 export interface CriterionGrade {
+  /** The stable criterion id this verdict speaks to (KTD1), when known. */
+  criterion_id?: string | null;
   /** The acceptance criterion text this verdict speaks to. */
   criterion: string;
   /** The tier the evidence actually occupied (R47 ladder). */
@@ -62,9 +69,25 @@ export interface CriterionGrade {
 }
 
 /**
- * The evidence available to grade one criterion. The reviewer verdict for the
- * calibrated-judge tier is read from the reviewer's result envelope by the
- * caller (U5/U8); grading is pure and never parses files itself.
+ * Materialize durable grade references (KTD6) into the acceptance predicate's
+ * verdict records. Resume re-evaluates from these durable references, never
+ * from specialist prose.
+ */
+export function gradesFromRefs(refs: CriterionGradeRef[]): CriterionGrade[] {
+  return refs.map((ref) => ({
+    criterion_id: ref.criterion_id,
+    criterion: ref.criterion,
+    tier: ref.tier as CriterionGrade["tier"],
+    grade: ref.grade,
+    route: ref.route,
+    basis: ref.basis,
+  }));
+}
+
+/**
+ * The evidence available to grade one criterion. The verifier verdict for the
+ * calibrated-judge tier is read from the verifier's v2 envelope by the caller
+ * (U5); grading is pure and never parses files itself.
  */
 export interface CriterionEvidence {
   /** The acceptance criterion text. */
@@ -72,19 +95,17 @@ export interface CriterionEvidence {
   /** The tier the evidence occupies. */
   tier: GradingTier | null;
   /**
-   * deterministic: true when the unit's verification contract all-passed
-   * (`EvidenceRecord.verification.all_passed`, U6).
+   * deterministic: the verifier's certification verdict from the mechanical
+   * evidence (contract commands all-passed, evidence genuine and complete,
+   * KTD6/KD6) — never Miah's own reading of `all_passed`. `ungraded` is the
+   * verifier's own declaration (KTD4) that it withholds a verdict; `null`
+   * means the envelope entry is missing entirely (R43).
    */
-  verificationAllPassed?: boolean;
-  /**
-   * calibrated-judge: the reviewer verdict extracted from the envelope
-   * (R43/R49). Absent (undefined/null) means the envelope carried no verdict.
-   */
-  reviewerVerdict?: "pass" | "fail" | null;
-  /** calibrated-judge: reviewer provider/model for the calibration lookup (R20). */
-  reviewerProvider?: string | null;
-  reviewerModel?: string | null;
-  /** human: the operator decision from `miah resolve` (U9), if any. */
+  verifierVerdict?: "pass" | "fail" | "ungraded" | null;
+  /** calibrated-judge: verifier provider/model for the calibration lookup (R20). */
+  verifierProvider?: string | null;
+  verifierModel?: string | null;
+  /** human: the operator decision (U6), if any. */
   operatorDecision?: "approve" | "reject" | null;
 }
 
@@ -130,40 +151,56 @@ export function gradeCriterion(evidence: CriterionEvidence, deps: GradeDeps = {}
   }
 }
 
-/** deterministic: pass/fail from the verification-contract exit codes (R45/R47). */
+/**
+ * deterministic: the verifier's certification verdict passes through (KD6:
+ * deterministic certification needs no calibration authority — custody already
+ * proves evidence integrity; the verifier certifies completeness and
+ * genuineness over the custody-verified artifacts, R3).
+ */
 function gradeDeterministic(evidence: CriterionEvidence): CriterionGrade {
-  if (evidence.verificationAllPassed === true) {
-    return { criterion: evidence.criterion, tier: "deterministic", grade: "pass", route: null, basis: "verification:all-passed" };
+  if (evidence.verifierVerdict === "pass") {
+    return { criterion: evidence.criterion, tier: "deterministic", grade: "pass", route: null, basis: "verifier-certified:all-passed" };
   }
-  if (evidence.verificationAllPassed === false) {
-    return { criterion: evidence.criterion, tier: "deterministic", grade: "fail", route: "rework", basis: "verification:failed" };
+  if (evidence.verifierVerdict === "fail") {
+    return { criterion: evidence.criterion, tier: "deterministic", grade: "fail", route: "rework", basis: "verifier-certified:failed" };
   }
-  return { criterion: evidence.criterion, tier: "deterministic", grade: "ungraded", route: "rework", basis: "no-verification-evidence" };
+  if (evidence.verifierVerdict === "ungraded") {
+    // KTD4/R48: the verifier itself declared the mechanical evidence
+    // insufficient for a verdict — authority-respecting escalation, never
+    // builder rework on a grade the verifier did not give.
+    return { criterion: evidence.criterion, tier: "deterministic", grade: "ungraded", route: "escalate", basis: "verifier-ungraded: mechanical evidence insufficient" };
+  }
+  return { criterion: evidence.criterion, tier: "deterministic", grade: "ungraded", route: "rework", basis: "no-verifier-certification" };
 }
 
 /**
- * calibrated-judge: the reviewer verdict is authoritative only when the
- * reviewer's profile clears the R74 bar; otherwise the verdict is an ungraded
+ * calibrated-judge: the verifier verdict is authoritative only when the
+ * verifier's profile clears the R74 bar; otherwise the verdict is an ungraded
  * input that escalates per R48/R20.
  */
 function gradeCalibratedJudge(evidence: CriterionEvidence, deps: GradeDeps): CriterionGrade {
-  const verdict = evidence.reviewerVerdict;
-  if (verdict !== "pass" && verdict !== "fail") {
-    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "rework", basis: "no-reviewer-verdict (missing envelope, R43)" };
+  const verdict = evidence.verifierVerdict;
+  if (verdict === "ungraded") {
+    // KTD4/R48: the verifier declared judgment unavailable — the escalation
+    // is the verifier's own authority respected, not builder rework.
+    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "verifier-ungraded: judgment unavailable" };
   }
-  const provider = evidence.reviewerProvider;
-  const model = evidence.reviewerModel;
+  if (verdict !== "pass" && verdict !== "fail") {
+    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "rework", basis: "no-verifier-verdict (missing envelope, R43)" };
+  }
+  const provider = evidence.verifierProvider;
+  const model = evidence.verifierModel;
   if (typeof provider !== "string" || provider.length === 0 || typeof model !== "string" || model.length === 0) {
-    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "reviewer-provenance-unrecorded (R20)" };
+    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "verifier-provenance-unrecorded (R20)" };
   }
   const metrics = deps.resolveCalibration ? deps.resolveCalibration(provider, model, "calibrated-judge") : null;
   if (metrics === null || !metrics.bar_cleared) {
-    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "reviewer-not-calibrated (R48/R20)" };
+    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "verifier-not-calibrated (R48/R20)" };
   }
   if (verdict === "pass") {
-    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "pass", route: null, basis: "calibrated-reviewer-verdict:pass" };
+    return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "pass", route: null, basis: "calibrated-verifier-verdict:pass" };
   }
-  return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "fail", route: "rework", basis: "calibrated-reviewer-verdict:fail" };
+  return { criterion: evidence.criterion, tier: "calibrated-judge", grade: "fail", route: "rework", basis: "calibrated-verifier-verdict:fail" };
 }
 
 /**

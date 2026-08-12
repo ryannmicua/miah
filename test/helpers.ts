@@ -88,9 +88,9 @@ export function makeEvent(
 /** Small units.json dependency graph: U1 root, U2 on U1, U3 on U2. */
 export function makeUnits(): Record<UnitId, PlanUnit> {
   return {
-    U1: { id: "U1", number: 1, title: "one", goal: null, requirements: null, creates: [], inputs: [], dependsOn: [], acceptance: null },
-    U2: { id: "U2", number: 2, title: "two", goal: null, requirements: null, creates: [], inputs: [], dependsOn: ["U1"], acceptance: null },
-    U3: { id: "U3", number: 3, title: "three", goal: null, requirements: null, creates: [], inputs: [], dependsOn: ["U2"], acceptance: null },
+    U1: { id: "U1", number: 1, title: "one", goal: null, requirements: null, creates: [], inputs: [], dependsOn: [], acceptance: null, verificationContract: null },
+    U2: { id: "U2", number: 2, title: "two", goal: null, requirements: null, creates: [], inputs: [], dependsOn: ["U1"], acceptance: null, verificationContract: null },
+    U3: { id: "U3", number: 3, title: "three", goal: null, requirements: null, creates: [], inputs: [], dependsOn: ["U2"], acceptance: null, verificationContract: null },
   };
 }
 

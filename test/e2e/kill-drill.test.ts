@@ -187,7 +187,8 @@ describe("e2e kill drill", () => {
 
       // --- Continue to completion (U10.2) -------------------------------------
       // U2 escalates on the calibrated-judge gate (empty corpora, KTD10), the
-      // operator approves via `miah resolve --decision approve`, U3 completes.
+      // operator approves via `miah resolve --decision approve` (a criterion-
+      // level operator grade, KTD6/KTD7), U3 completes.
       await driveToAwaitingApproval(opts, runId, ["U2"]);
       const finalState = derivedState(basePath, runId);
       expect(finalState.phase).toBe("AwaitingApproval");
@@ -200,6 +201,98 @@ describe("e2e kill drill", () => {
       // The run store's lease was released on the clean final exit.
       const finalLease = JSON.parse(fs.readFileSync(layoutOf(basePath, runId).leasePath, "utf8"));
       expect(finalLease.released).toBe(true);
+    },
+    2_400_000,
+  );
+
+  it.runIf(paseoCliAvailable())(
+    "kill after U1's builder termination -> resume dispatches the verifier, never a second builder (KTD5, U7.AC2)",
+    async () => {
+      const repo = makeFixtureRepo();
+      const config = e2eConfig();
+      const basePath = makeBasePath();
+      const opts: E2EOptions = { basePath, config, repoRoot: repo.repoRoot };
+
+      const runId = await startRun(TEST_PLAN, opts, makeFakeProbe());
+      const journalPath = layoutOf(basePath, runId).journalPath;
+
+      // The child drives real dispatches; kill it the moment U1's BUILDER
+      // terminates successfully — the frozen candidate now awaits verification.
+      const driveChild = spawnDriveChild({
+        runId,
+        basePath,
+        config,
+        workspaceRoot: repo.repoRoot,
+        verificationCommands: {
+          U1: ["node -e \"require('fs').existsSync('src/hello.ts')||process.exit(1)\""],
+          U2: ["node -e \"require('fs').existsSync('src/greeter.ts')||process.exit(1)\""],
+          U3: ["node -e \"JSON.parse(require('fs').readFileSync('config/app.json','utf8'))\""],
+        },
+        once: false,
+      });
+      const u1BuilderTerminated = await waitForJournalEvent(
+        journalPath,
+        (event) =>
+          event.type === "dispatch_terminated" &&
+          event.unit_id === "U1" &&
+          event.role === "builder" &&
+          event.outcome === "success",
+        900_000,
+      );
+      expect(u1BuilderTerminated).toBeDefined();
+      const killed = killChild(driveChild.child);
+      await waitForChildExit(driveChild.child, 20_000);
+      expect(killed, "the driver should have been killed mid-run").toBe(true);
+
+      const layout = layoutOf(basePath, runId);
+      await waitForLeaseAvailable(layout.leasePath, config.lease.ttl_s, 240_000);
+
+      // The frozen candidate is durable: replay derives awaiting_verification.
+      const stateBefore = derivedState(basePath, runId);
+      expect(stateBefore.units.U1?.status).toBe("awaiting_verification");
+      expect(stateBefore.awaiting_verification.U1).toMatchObject({ take: 1 });
+      const lastPreKillSeq = journalEvents(basePath, runId).at(-1)?.seq ?? 0;
+
+      // Resume: the next step dispatches the VERIFIER into the frozen
+      // candidate's workspace — never a second builder for U1.
+      const resumeCode = await quietDriveOnce(opts, runId);
+      expect(resumeCode).toBe(0);
+      const eventsAfterResume = journalEvents(basePath, runId);
+      expect(
+        eventsAfterResume.some(
+          (event) =>
+            event.type === "dispatch_intent" &&
+            event.unit_id === "U1" &&
+            event.role === "verifier" &&
+            (event.seq ?? 0) > lastPreKillSeq,
+        ),
+      ).toBe(true);
+      expect(
+        eventsAfterResume.some(
+          (event) =>
+            event.type === "dispatch_intent" &&
+            event.unit_id === "U1" &&
+            event.role === "builder" &&
+            (event.seq ?? 0) > lastPreKillSeq,
+        ),
+      ).toBe(false);
+
+      // Continue to completion: U2 escalates on the calibration gate, the
+      // operator approves, U3 completes — the verifier grades are the only
+      // grade sources in the final record (KTD6).
+      await driveToAwaitingApproval(opts, runId, ["U2"]);
+      const finalState = derivedState(basePath, runId);
+      expect(finalState.phase).toBe("AwaitingApproval");
+      expect(finalState.units.U1?.status).toBe("accepted");
+      expect(finalState.units.U2?.status).toBe("accepted");
+      expect(finalState.units.U3?.status).toBe("accepted");
+      const finalEvents = journalEvents(basePath, runId);
+      expect(
+        finalEvents.some((e) => e.type === "criterion_grades_recorded" && e.unit_id === "U1"),
+      ).toBe(true);
+      expect(
+        finalEvents.some((e) => e.type === "criterion_grades_recorded" && e.unit_id === "U2"),
+      ).toBe(true);
     },
     2_400_000,
   );

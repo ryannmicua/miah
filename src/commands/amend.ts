@@ -30,6 +30,7 @@ import { resolveRunLayout, RunStore } from "../run-store";
 import { writeSnapshot } from "../snapshot";
 import { readUnitsFromStore } from "../step";
 import type { Config, PlanUnit, UnitId } from "../types";
+import { contractsEqual } from "../verification-contract";
 import { collectWorkspacePaths } from "./preflight";
 import { currentSnapshotHash, findLatestPlanSnapshot } from "./status";
 import { operatorIdentity } from "./stop";
@@ -64,8 +65,11 @@ function pathListsEqual(a: string[], b: string[]): boolean {
 }
 
 /**
- * Units whose `creates:`/`inputs:`/`depends-on` changed between two units.json
- * views (R68, D6-f). Added and removed units count as changed.
+ * Units whose `creates:`/`inputs:`/`depends-on` or verification contract
+ * changed between two units.json views (R68, D6-f, KTD1). Contract content is
+ * compared in normalized form, so an order/whitespace-only contract edit is
+ * not a scope change while a command-string or criterion-mapping change is.
+ * Added and removed units count as changed.
  */
 export function diffUnits(
   oldUnits: Record<UnitId, PlanUnit>,
@@ -83,7 +87,8 @@ export function diffUnits(
     if (
       !pathListsEqual(oldUnit.creates ?? [], newUnit.creates ?? []) ||
       !pathListsEqual(oldUnit.inputs ?? [], newUnit.inputs ?? []) ||
-      !pathListsEqual(oldUnit.dependsOn ?? [], newUnit.dependsOn ?? [])
+      !pathListsEqual(oldUnit.dependsOn ?? [], newUnit.dependsOn ?? []) ||
+      !contractsEqual(oldUnit.verificationContract, newUnit.verificationContract)
     ) {
       changed.push(id);
     }

@@ -15,6 +15,7 @@ import { cleanupTempDirs, fastConfig, makeTempDir } from "./helpers";
 import { makeFakeProbe } from "./fixtures/fake-substrate-probe";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
 import {
+  defaultVerifierEnvelope,
   inspectResult,
   passRunner,
   seedBuilderWorktree,
@@ -38,7 +39,11 @@ const ONE_UNIT_PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -60,7 +65,11 @@ const TWO_UNIT_PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/a.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/a.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
   "### U2. Consumer module",
   "",
@@ -69,7 +78,11 @@ const TWO_UNIT_PLAN = [
   "- **inputs:** none",
   "- **depends-on:** U1",
   "- **Acceptance:**",
-  "  - `src/b.ts` exists and is exported — `tier: deterministic`",
+  "  - U2.AC1. `src/b.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U2.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -121,6 +134,7 @@ async function driveToApproval(run: AdmittedRun, seeds: Array<{ unit: string; ta
     canonicalWorktree,
     runCommand: passRunner,
     verificationCommandsFor: () => ["npm test"],
+    verifierEnvelopeFor: defaultVerifierEnvelope,
   });
   expect(code).toBe(0);
 }
@@ -281,7 +295,7 @@ describe("reject command", () => {
     expect(state.phase).toBe("AwaitingApproval");
 
     const { events } = readJournalFile(after.layout.journalPath);
-    const u2Intents = events.filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+    const u2Intents = events.filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2");
     expect(u2Intents).toHaveLength(2);
     const resumed = events.some(
       (e) => e.type === "phase_transition" && e.from === "AwaitingApproval" && e.to === "Ready",

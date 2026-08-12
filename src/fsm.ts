@@ -13,7 +13,7 @@
  * | Admitting | Preflight + substrate probe + lease acquisition |
  * | Ready | Lease held, units parsed, no work dispatched yet |
  * | Implementing | Builder(s) dispatched for eligible units |
- * | Reviewing | Tester/reviewer dispatched for a frozen candidate |
+ * | Reviewing | Verifier dispatched for a frozen candidate (KTD5) |
  * | AwaitingApproval | All units accepted, approval package written, awaiting operator |
  * | Attention | Escalation raised, run paused, awaiting operator resolve |
  * | Stopping | Operator issued stop, terminating in-flight, releasing lease |
@@ -21,7 +21,7 @@
  *
  * Transitions (plan U8 approach): Admitting→Ready (after lease),
  * Ready→Implementing (first dispatch), Implementing→Reviewing (candidate
- * frozen for testing), Reviewing→Implementing (next unit) or→AwaitingApproval
+ * frozen for verification), Reviewing→Implementing (next unit) or→AwaitingApproval
  * (all units done), AwaitingApproval→Complete (operator approve) or→Ready
  * (R67 resume: the operator marked units for re-dispatch via `miah reject
  * --rework` / `miah amend` while the run sat at the gate), any→Attention

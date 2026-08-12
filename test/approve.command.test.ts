@@ -17,6 +17,7 @@ import { cleanupTempDirs, fastConfig, makeTempDir } from "./helpers";
 import { makeFakeProbe } from "./fixtures/fake-substrate-probe";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
 import {
+  defaultVerifierEnvelope,
   inspectResult,
   passRunner,
   seedBuilderWorktree,
@@ -40,7 +41,11 @@ const PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -91,6 +96,7 @@ async function driveToApproval(run: AdmittedRun): Promise<void> {
     canonicalWorktree,
     runCommand: passRunner,
     verificationCommandsFor: () => ["npm test"],
+    verifierEnvelopeFor: defaultVerifierEnvelope,
   });
   expect(code).toBe(0);
 }

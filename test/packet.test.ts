@@ -100,7 +100,7 @@ describe("dispatch packet", () => {
     expect(packet.authority_bounds.code_writing).toBe(false);
   });
 
-  it("authority bounds are role-appropriate (R8-R11)", () => {
+  it("authority bounds are role-appropriate (R8-R11, KTD8)", () => {
     const planner = authorityBoundsFor("planner");
     expect(planner.read_only).toBe(true);
     expect(planner.code_writing).toBe(false);
@@ -109,11 +109,16 @@ describe("dispatch packet", () => {
     expect(builder.read_only).toBe(false);
     expect(builder.code_writing).toBe(true);
 
-    const reviewer = authorityBoundsFor("reviewer");
-    expect(reviewer.read_only).toBe(true);
-    expect(reviewer.code_writing).toBe(false);
+    const verifier = authorityBoundsFor("verifier");
+    expect(verifier.read_only).toBe(true);
+    expect(verifier.code_writing).toBe(false);
+    expect(verifier.envelope_only).toBe(true);
 
-    for (const role of ["planner", "builder", "tester", "reviewer"] as const) {
+    const tester = authorityBoundsFor("tester");
+    expect(tester.read_only).toBe(false);
+    expect(tester.code_writing).toBe(false);
+
+    for (const role of ["planner", "builder", "tester", "verifier"] as const) {
       const bounds = authorityBoundsFor(role);
       expect(bounds.scope_change).toBe("prohibited");
       expect(bounds.recursive_workers).toBe("prohibited");
@@ -121,6 +126,122 @@ describe("dispatch packet", () => {
       expect(bounds.worktree_isolation).toBe("mandatory");
       expect(bounds.result_contract).toBe("envelope-at-declared-path");
     }
+  });
+
+  it("U4.AC2: verifier packets are read-only except the declared envelope and carry candidate/package/contract context", () => {
+    const packet = composePacket({
+      unit: UNIT_U1,
+      role: "verifier",
+      take: 1,
+      planExcerpt: extractUnitSection(PLAN_TEXT, "U1") ?? PLAN_TEXT,
+      envelopePath: ".miah/envelope-verifier-U1-t1.json",
+      idempotencyKey: "dispatch-verifier-U1-t1-a1",
+      deadline: "2026-08-07T00:00:00.000Z",
+      provider: "opencode",
+      model: "opencode-go/glm-5.2",
+      verifier: {
+        package_path: ".miah/verifier/U1/dispatch-builder-U1-t1",
+        package_sha256: "a".repeat(64),
+        candidate_attempt: "dispatch-builder-U1-t1",
+        candidate_take: 1,
+        workspace_id: "wks-1",
+        criteria: [
+          { id: "U1.AC1", text: "exists", tier: "deterministic" },
+          { id: "U1.AC2", text: "judged", tier: "calibrated-judge" },
+        ],
+        contract_commands: [{ id: "U1.CMD1", command: "npm test" }],
+        contract_summary: "U1.AC1 -> U1.CMD1",
+      },
+    });
+    expect(packet.role).toBe("verifier");
+    expect(packet.authority_bounds.read_only).toBe(true);
+    expect(packet.authority_bounds.code_writing).toBe(false);
+    expect(packet.authority_bounds.envelope_only).toBe(true);
+    expect(packet.result_envelope_path).toBe(".miah/envelope-verifier-U1-t1.json");
+
+    const context = packet.verifier_context;
+    expect(context).toBeDefined();
+    expect(context?.package_path).toBe(".miah/verifier/U1/dispatch-builder-U1-t1");
+    expect(context?.package_sha256).toBe("a".repeat(64));
+    expect(context?.candidate_attempt).toBe("dispatch-builder-U1-t1");
+    expect(context?.candidate_take).toBe(1);
+    expect(context?.workspace_id).toBe("wks-1");
+    expect(context?.criteria.map((c) => c.id)).toEqual(["U1.AC1", "U1.AC2"]);
+    expect(context?.contract_commands).toEqual([{ id: "U1.CMD1", command: "npm test" }]);
+
+    // Non-verifier packets carry no verifier context (R17: no reviewer either).
+    expect(makePacket("builder").verifier_context).toBeUndefined();
+    expect(makePacket("tester").verifier_context).toBeUndefined();
+  });
+
+  it("U4.AC2: the verifier prompt allows only the declared envelope write and cites the package", () => {
+    const packet = composePacket({
+      unit: UNIT_U1,
+      role: "verifier",
+      take: 1,
+      planExcerpt: PLAN_TEXT,
+      envelopePath: ".miah/envelope-verifier-U1-t1.json",
+      idempotencyKey: "dispatch-verifier-U1-t1-a1",
+      deadline: "2026-08-07T00:00:00.000Z",
+      provider: "opencode",
+      model: "opencode-go/glm-5.2",
+      verifier: {
+        package_path: ".miah/verifier/U1/dispatch-builder-U1-t1",
+        package_sha256: "a".repeat(64),
+        candidate_attempt: "dispatch-builder-U1-t1",
+        candidate_take: 1,
+        workspace_id: "wks-1",
+        criteria: [{ id: "U1.AC1", text: "exists", tier: "deterministic" }],
+        contract_commands: [{ id: "U1.CMD1", command: "npm test" }],
+        contract_summary: "U1.AC1 -> U1.CMD1",
+      },
+    });
+    const prompt = renderPacketPrompt(packet, computePacketHash(packet));
+    expect(prompt).toContain("## Verification task (verifier)");
+    expect(prompt).toContain(".miah/verifier/U1/dispatch-builder-U1-t1");
+    expect(prompt).toContain("a".repeat(64));
+    expect(prompt).toContain("Grade EXACTLY these acceptance criteria");
+    expect(prompt).toContain("U1.AC1 [deterministic]");
+    // The only write permitted is the declared envelope (KTD3/R13).
+    expect(prompt).toContain("the ONLY write you may perform is your result envelope");
+    // No run-store write authority anywhere in the prompt.
+    expect(prompt).toContain("Writing to the Miah run store is prohibited.");
+    // The verifier never runs the frozen commands; it grades their evidence.
+    expect(prompt).toContain("you never run them");
+  });
+
+  it("U4.AC2: the verifier prompt's grade contract excludes human-tier criteria unambiguously (KTD7 wording)", () => {
+    const packet = composePacket({
+      unit: UNIT_U1,
+      role: "verifier",
+      take: 1,
+      planExcerpt: PLAN_TEXT,
+      envelopePath: ".miah/envelope-verifier-U1-t1.json",
+      idempotencyKey: "dispatch-verifier-U1-t1-a1",
+      deadline: "2026-08-07T00:00:00.000Z",
+      provider: "opencode",
+      model: "opencode-go/glm-5.2",
+      verifier: {
+        package_path: ".miah/verifier/U1/dispatch-builder-U1-t1",
+        package_sha256: "a".repeat(64),
+        candidate_attempt: "dispatch-builder-U1-t1",
+        candidate_take: 1,
+        workspace_id: "wks-1",
+        criteria: [
+          { id: "U1.AC1", text: "mechanical", tier: "deterministic" },
+          { id: "U1.AC2", text: "operator decides", tier: "human" },
+        ],
+        contract_commands: [{ id: "U1.CMD1", command: "npm test" }],
+        contract_summary: "U1.AC1 -> U1.CMD1",
+      },
+    });
+    const prompt = renderPacketPrompt(packet, computePacketHash(packet));
+    // The grade contract is scoped to non-human criteria so the human-tier
+    // omission instruction cannot be misread as "grade it anyway" (the
+    // envelope-validation rejection/retry loop failure mode).
+    expect(prompt).toContain("Every grade entry: one per non-human criterion");
+    expect(prompt).not.toContain("Every grade entry: one per criterion");
+    expect(prompt).toContain("Human-tier criteria are graded by the operator: omit them from your envelope.");
   });
 
   it("packet hash is a deterministic SHA-256 of the canonical packet (R36)", () => {

@@ -1,14 +1,19 @@
 /**
  * Kill-drill v2 child process.
  *
- * Appends a dispatch intent (and optionally the matching dispatch_created),
- * signals readiness, then stays alive until the parent kills it — simulating
- * Miah dying mid-dispatch:
+ * Appends a dispatch intent (and optionally the matching dispatch_created or a
+ * successful dispatch_terminated), signals readiness, then stays alive until
+ * the parent kills it — simulating Miah dying mid-dispatch:
  *
- *   - mode "intent-only":     Miah died right after `dispatch_intent`, before
- *                             the adapter call (R37 intent-without-created).
- *   - mode "intent+created":  Miah died after `dispatch_created`, before
- *                             `dispatch_terminated`.
+ *   - mode "intent-only":         Miah died right after `dispatch_intent`,
+ *                                 before the adapter call (R37
+ *                                 intent-without-created).
+ *   - mode "intent+created":      Miah died after `dispatch_created`, before
+ *                                 `dispatch_terminated`.
+ *   - mode "terminated-success":  Miah died after the builder's successful
+ *                                 `dispatch_terminated` — the preserved
+ *                                 candidate must resume at verification
+ *                                 (KTD5), not with a fresh builder dispatch.
  *
  * Usage: node node_modules/vite-node/vite-node.mjs test/helpers/kill-drill-v2-child.ts
  *            <scenario.json> <ready-marker>
@@ -25,9 +30,10 @@ interface Scenario {
   runId: string;
   config: Config;
   holderId: string;
-  mode: "intent-only" | "intent+created";
+  mode: "intent-only" | "intent+created" | "terminated-success";
   intent: Record<string, unknown>;
   created?: Record<string, unknown>;
+  terminated?: Record<string, unknown>;
 }
 
 function main(): void {
@@ -59,8 +65,11 @@ function main(): void {
   }
 
   store.append("dispatch_intent", scenario.intent);
-  if (scenario.mode === "intent+created" && scenario.created !== undefined) {
+  if (scenario.created !== undefined) {
     store.append("dispatch_created", scenario.created);
+  }
+  if (scenario.mode === "terminated-success" && scenario.terminated !== undefined) {
+    store.append("dispatch_terminated", scenario.terminated);
   }
 
   fs.writeFileSync(markerPath, "ready", "utf8");

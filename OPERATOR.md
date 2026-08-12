@@ -4,7 +4,7 @@
 
 ## What Miah is (one paragraph)
 
-Miah is a **resumable plan supervisor** CLI. It directs one approved plan at a time from executable plan to verified completion: it validates the plan, locks it to an immutable snapshot, hands each unit to an independently dispatched specialist agent (builder), runs completed work past independent testers/reviewers, grades the harvested evidence against tiered acceptance criteria, and refuses to call a step done until the criteria pass — or you sign off. Every decision, dispatch, and transition is appended to a durable journal, so a crashed session never loses progress: the next `miah run` picks up exactly where the last one left off. Miah itself never implements, tests, or reviews — it orchestrates, journals, verifies evidence, and gates.
+Miah is a **resumable plan supervisor** CLI. It directs one approved plan at a time from executable plan to verified completion: it validates the plan, locks it to an immutable snapshot, hands each unit to an independently dispatched specialist agent (builder), runs completed work past an independent verifier specialist who grades the harvested evidence against tiered acceptance criteria, and refuses to call a step done until the criteria pass — or you sign off. Every decision, dispatch, and transition is appended to a durable journal, so a crashed session never loses progress: the next `miah run` picks up exactly where the last one left off. Miah itself never implements, tests, or verifies grades — it orchestrates, journals, senses, custody-chains evidence, and gates.
 
 Sources: [`VISION.md`](./VISION.md), [`README.md`](./README.md), [`docs/architecture/system-overview.md`](./docs/architecture/system-overview.md).
 
@@ -12,7 +12,7 @@ Sources: [`VISION.md`](./VISION.md), [`README.md`](./README.md), [`docs/architec
 
 - **The operator** (a person, or an agent acting for them) runs the CLI commands: `miah start`, `miah run`, `miah status`, `miah resolve`, `miah approve`, `miah reject`, `miah stop`, `miah amend`. Every one of these is journaled as an `operator_decision` with identity — your authority is explicit and auditable.
 - **Miah (the CLI)** supervises only. It decides routine sequencing, bounded rework, and ordinary disagreements among specialists.
-- **Specialists** are the actual workers — planner, builder, tester, reviewer — each an independently dispatched Paseo agent session in its own worktree.
+- **Specialists** are the actual workers — planner, builder, tester, verifier — each an independently dispatched Paseo agent session in its own worktree.
 - Because supervisor state lives on disk (journal + snapshot + lease), the *driver* doesn't have to be any specific process: a terminal, a cron job, a Paseo schedule, or another agent session may pick the run up. A run nobody is driving is **paused, not lost** (ADR:D1-b).
 
 ## Before you start (prerequisites)
@@ -31,7 +31,7 @@ Miah admits **CE `ce-unified-plan/v1`** markdown documents:
 
 - Frontmatter: `artifact_contract`, `execution` (must be `code`), `title`.
 - A `## Implementation Units` section containing one `### U<n>. <title>` section per unit, each with `Goal`, `Requirements`, `creates:` (backtick-quoted paths), `inputs:`, `depends-on` (U-ID tokens), and an indented `Acceptance` block.
-- Every acceptance criterion declares a **tier** from the D5 ladder: `deterministic` (machine-checkable), `calibrated-judge` (independent reviewer verdict, requires a calibration corpus), or `human` (your judgment).
+- Every acceptance criterion declares a **tier** from the D5 ladder: `deterministic` (machine-checkable), `calibrated-judge` (independent verifier verdict, requires a calibration corpus), or `human` (your judgment).
 
 Preflight is pure and block-only: structural (U-IDs, acyclic deps, required fields, recognized tiers), referential (`inputs:` resolve; no cross-unit `creates:` conflicts), and verifiability (every criterion has a tier). A plan that fails any check is refused with structured findings.
 
@@ -43,10 +43,10 @@ Every specialist gets exactly one **dispatch packet** (`miah-dispatch-packet/v1`
 
 1. **Header** — role, unit, take, idempotency key, deadline, provider/model, packet hash.
 2. **Objective** — the unit's `Goal` (fallback: its title).
-3. **Authority bounds** — planner/reviewer are **read-only**; a builder may write only inside its own worktree and only its declared `creates:` paths; scope/requirement/acceptance changes, recursive agents, and run-store writes are all prohibited.
+3. **Authority bounds** — planner/verifier are **read-only** (the verifier may write only its declared result envelope); a builder may write only inside its own worktree and only its declared `creates:` paths; scope/requirement/acceptance changes, recursive agents, and run-store writes are all prohibited.
 4. **Deliverables (`creates:`)** and **inputs (`inputs:`)** — the unit's declared paths.
 5. **Result-envelope output schema** — the single JSON file it must write (`.miah/envelope-<role>-<unit>-t<take>.json`), whose `self_claim` and self-reported hashes carry no evidence authority.
-6. **Plan snapshot excerpt** — the unit's own `### U<n>` section verbatim (builder/tester/reviewer) or the full snapshot (planner).
+6. **Plan snapshot excerpt** — the unit's own `### U<n>` section verbatim (builder/tester/verifier) or the full snapshot (planner).
 
 **Where the instructions come from:** the packet is composed from the plan's parsed-once machine view (`units.json`, R24) plus the immutable snapshot, the role's fixed authority bounds (`src/packet.ts:42`), the envelope schema (`src/envelope.ts`), the provider/model for the role (`src/types.ts` D8-i defaults, overridden by `~/.paseo/orchestration-preferences.json`), and the deadline (config `dispatch.max_duration`, default 15m).
 
@@ -93,7 +93,7 @@ Routine decisions (sequencing, bounded rework, specialist disagreements) stay wi
 
 ## Steering agents mid-run
 
-You do **not** steer specialist agents directly — there is no channel into a running session. Specialists receive one immutable, content-hashed dispatch packet (role, objective, authority bounds: builders may write only their declared `creates:` paths; planners/reviewers are read-only), and Miah never reaches into a session mid-task. Steering happens through journaled operator commands that change what the run does next; the control loop is always *pause → decide → resume* at a step boundary.
+You do **not** steer specialist agents directly — there is no channel into a running session. Specialists receive one immutable, content-hashed dispatch packet (role, objective, authority bounds: builders may write only their declared `creates:` paths; planners/verifiers are read-only), and Miah never reaches into a session mid-task. Steering happens through journaled operator commands that change what the run does next; the control loop is always *pause → decide → resume* at a step boundary.
 
 | Command | What it steers | When |
 |---|---|---|

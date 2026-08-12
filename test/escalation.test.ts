@@ -96,4 +96,39 @@ describe("escalation", () => {
     expect(raised?.escalation_id).toBe(first.escalation_id);
     expect(first.escalation_id).toBe(`esc-${first.event.seq}`);
   });
+
+  it("U6.AC1: verifier-flagged-for-human-judgment carries the complete KTD7 payload through summaries", () => {
+    const t = setupStore();
+    const raised = raiseEscalation(t.store, {
+      unit_id: "U1",
+      trigger: "verifier-flagged-for-human-judgment",
+      reason: "verifier flagged criterion U1.AC2 for human judgment",
+      criterion: "judged",
+      payload: {
+        criterion_id: "U1.AC2",
+        declared_tier: "calibrated-judge",
+        verifier_attempt: "dispatch-verifier-U1-t1-a1",
+        verifier_provider: "opencode",
+        verifier_model: "opencode-go/glm-5.2",
+        basis: "evidence is materially inadequate for a judgment",
+        evidence_package_sha256: "a".repeat(64),
+        evidence: [{ artifact: "builder/verification.json", sha256: "b".repeat(64) }],
+      },
+    });
+    const summary = unresolvedEscalations(t.store)[0];
+    expect(summary).toMatchObject({
+      escalation_id: raised.escalation_id,
+      unit_id: "U1",
+      trigger: "verifier-flagged-for-human-judgment",
+      criterion_id: "U1.AC2",
+      declared_tier: "calibrated-judge",
+      verifier_attempt: "dispatch-verifier-U1-t1-a1",
+      verifier_provider: "opencode",
+      verifier_model: "opencode-go/glm-5.2",
+      basis: "evidence is materially inadequate for a judgment",
+      evidence_package_sha256: "a".repeat(64),
+    });
+    expect(summary.criterion).toBe("judged");
+    expect(summary.evidence).toEqual([{ artifact: "builder/verification.json", sha256: "b".repeat(64) }]);
+  });
 });

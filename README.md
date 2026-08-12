@@ -1,10 +1,10 @@
 # Miah
 
-> Miah is a resumable plan supervisor: it directs one approved plan at a time, start to finish. It hands every step to an implementation agent, runs it past an independent reviewer, and refuses to call a step done until you sign off. Each run is locked to an immutable plan snapshot, tracked in an append-only journal, and picks up exactly where it left off if your session dies. Like the wall-builder Nehemiah, it keeps the ledger, keeps the crews honest, and stays at it until the work is done — your session can crash, and Miah won't lose a step.
+> Miah is a resumable plan supervisor: it directs one approved plan at a time, start to finish. It hands every step to an implementation agent, runs completed work past an independent verifier agent, and refuses to call a step done until you sign off. Each run is locked to an immutable plan snapshot, tracked in an append-only journal, and picks up exactly where it left off if your session dies. Like the wall-builder Nehemiah, it keeps the ledger, keeps the crews honest, and stays at it until the work is done — your session can crash, and Miah won't lose a step.
 
 ## Status
 
-Miah v1 is shipped: implemented per plan R1–R90 and merged via PR #1 (squash commit `d7eac30`). 340 unit tests plus the E2E suites (including kill drill v3) pass and CI is green; an independent MiniMax-M3 review returned APPROVE with all findings fixed.
+Miah v1 is shipped: implemented per plan R1–R90 and merged via PR #1 (squash commit `d7eac30`). 340 unit tests plus the E2E suites (including kill drill v3) pass and CI is green; an independent MiniMax-M3 review returned APPROVE with all findings fixed. The independent-verifier change (plan `2026-08-11-001`) replaces Miah's internal grading with a read-only verifier specialist and per-criterion operator grades.
 
 ## Getting started
 

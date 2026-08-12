@@ -35,6 +35,46 @@ function planWithSections(
   )}\n`;
 }
 
+/**
+ * A criterion bullet with a stable `U<num>.AC<n>.` ID prefix (KTD1). Bullets
+ * that already carry an ID prefix are passed through unchanged; the rest get
+ * an auto-numbered ID so the emitted plan is contract-valid by default.
+ */
+function idBullet(unitId: string, index: number, criterion: string): string {
+  if (/^U\d+\.AC\d+\s*[.:]\s/.test(criterion)) {
+    return criterion;
+  }
+  return `U${unitId}.AC${index + 1}. ${criterion}`;
+}
+
+/**
+ * The default Verification Contract block for a unit: one command mapped to
+ * every acceptance criterion (KTD1). Pass `contract: "none"` to omit the
+ * block, or a raw string to use a custom block verbatim.
+ */
+function contractBlock(
+  unitId: string,
+  criteria: string[] | undefined,
+  custom: string | "none" | undefined,
+): string[] {
+  if (custom === "none") {
+    return [];
+  }
+  if (typeof custom === "string") {
+    return ["- **Verification Contract:**", ...custom.split("\n")];
+  }
+  const ids = (criteria ?? []).map((criterion, index) => {
+    const prefix = criterion.match(/^U\d+\.AC\d+/);
+    return prefix !== null ? prefix[0] : `U${unitId}.AC${index + 1}`;
+  });
+  return [
+    "- **Verification Contract:**",
+    "  - **Commands:** `" + `${unitId}.CMD1` + "` = `npm test`",
+    "  - **Criterion mapping:** " + ids.map((id) => `\`${id}\` -> \`${unitId}.CMD1\``).join("; "),
+    "  - **Evidence sources:** `verification`",
+  ];
+}
+
 function unit(
   id: string,
   opts: {
@@ -42,6 +82,8 @@ function unit(
     inputs?: string[] | "none";
     dependsOn?: string[];
     acceptance?: string[];
+    /** Custom `Verification Contract` block content, or "none" to omit it. */
+    contract?: string | "none";
   } = {},
 ): string {
   const lines: string[] = [`### U${id}. Test unit ${id}`, "", `- **Goal:** Goal for U${id}.`, ""];
@@ -61,11 +103,12 @@ function unit(
   }
   if (opts.acceptance !== undefined) {
     lines.push("- **Acceptance:**");
-    for (const criterion of opts.acceptance) {
-      lines.push(`  - ${criterion}`);
-    }
+    opts.acceptance.forEach((criterion, index) => {
+      lines.push(`  - ${idBullet(id, index, criterion)}`);
+    });
     lines.push("");
   }
+  lines.push(...contractBlock(id, opts.acceptance, opts.contract));
   return lines.join("\n");
 }
 
@@ -280,5 +323,187 @@ describe("preflight", () => {
     expect(structuralPreflight(plan)).toEqual([]);
     expect(referentialPreflight(plan, [])).toEqual([]);
     expect(verifiabilityPreflight(plan)).toEqual([]);
+  });
+});
+
+describe("verification contract preflight (KTD1, R8-R10)", () => {
+  function contractUnit(opts: { mapping: string; commands?: string; evidence?: string }): string {
+    const lines = [
+      "- **creates:** none",
+      "- **inputs:** none",
+      "- **depends-on:** none",
+      "- **Acceptance:**",
+      "  - U1.AC1. `src/a.ts` exists — `tier: deterministic`",
+      "  - U1.AC2. Reviewer judges the API — `tier: calibrated-judge`",
+      "  - U1.AC3. The operator decides — `tier: human`",
+      "- **Verification Contract:**",
+      `  - **Commands:** ${opts.commands ?? "`U1.CMD1` = `npm test`"}`,
+      `  - **Criterion mapping:** ${opts.mapping}`,
+      `  - **Evidence sources:** ${opts.evidence ?? "`verification`"}`,
+    ];
+    return `### U1. Contract unit\n\n${lines.join("\n")}\n`;
+  }
+
+  const VALID_MAPPING =
+    "`U1.AC1` -> `U1.CMD1`; `U1.AC2` -> ; `U1.AC3` ->";
+
+  it("a valid mixed-tier contract passes structural preflight", () => {
+    const verdict = preflightPlan(
+      planWithSections([contractUnit({ mapping: VALID_MAPPING })]),
+    );
+    expect(verdict.ok).toBe(true);
+    expect(verdict.structural).toEqual([]);
+  });
+
+  it("an absent Verification Contract block is refused and names the unit", () => {
+    const planText = planWithSections([
+      unit("1", {
+        creates: "none",
+        inputs: "none",
+        dependsOn: [],
+        acceptance: ["U1.AC1. works — `tier: deterministic`"],
+        contract: "none",
+      }),
+    ]);
+    const verdict = preflightPlan(planText);
+    expect(verdict.ok).toBe(false);
+    const missing = verdict.structural.filter((f) => f.code === "missing-verification-contract");
+    expect(missing.length).toBe(1);
+    expect(missing[0].unitId).toBe("U1");
+  });
+
+  it("a zero-command contract is refused and names the unit", () => {
+    const planText = planWithSections([
+      unit("1", {
+        creates: "none",
+        inputs: "none",
+        dependsOn: [],
+        acceptance: ["U1.AC1. works — `tier: deterministic`"],
+        contract: ["", "  - **Commands:**", "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`", "  - **Evidence sources:** `verification`"].join("\n"),
+      }),
+    ]);
+    const verdict = preflightPlan(planText);
+    expect(verdict.ok).toBe(false);
+    const zero = verdict.structural.filter((f) => f.code === "zero-verification-commands");
+    expect(zero.length).toBe(1);
+    expect(zero[0].unitId).toBe("U1");
+    expect(zero[0].message).toContain("U1");
+  });
+
+  it("duplicate command IDs are refused", () => {
+    const verdict = preflightPlan(
+      planWithSections([
+        contractUnit({
+          mapping: VALID_MAPPING,
+          commands: "`U1.CMD1` = `npm test`; `U1.CMD1` = `npm run build`",
+        }),
+      ]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "duplicate-command-id")).toBe(true);
+  });
+
+  it("a missing criterion ID is refused", () => {
+    const planText = planWithSections([
+      [
+        "### U1. Idless unit",
+        "",
+        "- **creates:** none",
+        "- **inputs:** none",
+        "- **depends-on:** none",
+        "- **Acceptance:**",
+        "  - works — `tier: deterministic`",
+        "- **Verification Contract:**",
+        "  - **Commands:** `U1.CMD1` = `npm test`",
+        "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+        "  - **Evidence sources:** `verification`",
+      ].join("\n"),
+    ]);
+    const verdict = preflightPlan(planText);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "missing-criterion-id")).toBe(true);
+  });
+
+  it("duplicate criterion IDs are refused", () => {
+    const planText = planWithSections([
+      unit("1", {
+        creates: "none",
+        inputs: "none",
+        dependsOn: [],
+        acceptance: [
+          "U1.AC1. first — `tier: deterministic`",
+          "U1.AC1. second — `tier: deterministic`",
+        ],
+      }),
+    ]);
+    const verdict = preflightPlan(planText);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "duplicate-criterion-id")).toBe(true);
+  });
+
+  it("an unknown criterion reference is refused", () => {
+    const verdict = preflightPlan(
+      planWithSections([
+        contractUnit({ mapping: "`U1.AC9` -> `U1.CMD1`; `U1.AC2` -> ; `U1.AC3` ->" }),
+      ]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "unknown-criterion-reference")).toBe(true);
+  });
+
+  it("an unknown command reference is refused", () => {
+    const verdict = preflightPlan(
+      planWithSections([
+        contractUnit({ mapping: "`U1.AC1` -> `U1.CMD9`; `U1.AC2` -> ; `U1.AC3` ->" }),
+      ]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "unknown-command-reference")).toBe(true);
+  });
+
+  it("a deterministic criterion with no mapped command is refused", () => {
+    const verdict = preflightPlan(
+      planWithSections([
+        contractUnit({ mapping: "`U1.AC1` -> ; `U1.AC2` -> ; `U1.AC3` ->" }),
+      ]),
+    );
+    expect(verdict.ok).toBe(false);
+    const noCommand = verdict.structural.filter(
+      (f) => f.code === "deterministic-criterion-no-command",
+    );
+    expect(noCommand.length).toBe(1);
+    expect(noCommand[0].message).toContain("U1.AC1");
+  });
+
+  it("an unmapped acceptance criterion is refused", () => {
+    const verdict = preflightPlan(
+      planWithSections([
+        contractUnit({ mapping: "`U1.AC1` -> `U1.CMD1`; `U1.AC3` ->" }),
+      ]),
+    );
+    expect(verdict.ok).toBe(false);
+    expect(verdict.structural.some((f) => f.code === "unmapped-criterion")).toBe(true);
+  });
+
+  it("historical contractless plans now fail with the new code (KTD1)", () => {
+    // A plan in the pre-feature shape: Acceptance bullets with tiers but no
+    // stable IDs and no Verification Contract block at all (R8-R10).
+    const planText = planWithSections([
+      [
+        "### U1. Legacy unit",
+        "",
+        "- **creates:** `src/a.ts`",
+        "- **inputs:** none",
+        "- **depends-on:** none",
+        "- **Acceptance:**",
+        "  - `src/a.ts` exists — `tier: deterministic`",
+      ].join("\n"),
+    ]);
+    const verdict = preflightPlan(planText);
+    expect(verdict.ok).toBe(false);
+    expect(
+      verdict.structural.some((f) => f.code === "missing-verification-contract"),
+    ).toBe(true);
+    expect(verdict.structural.some((f) => f.code === "missing-criterion-id")).toBe(true);
   });
 });

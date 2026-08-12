@@ -124,7 +124,7 @@ describe("integration", () => {
     const outcome = await evaluateUnitAcceptance({
       store: t.store,
       unit: unit(["src/foo.py"]),
-      records: [gradeCriterion({ criterion: CRITERION.text, tier: "deterministic", verificationAllPassed: true })],
+      records: [gradeCriterion({ criterion: CRITERION.text, tier: "deterministic", verifierVerdict: "pass" })],
       openGaps: t.store.stateSnapshot().open_gaps,
       integration: {
         store: t.store,
@@ -168,7 +168,7 @@ describe("integration", () => {
     const outcome = await evaluateUnitAcceptance({
       store: t.store,
       unit: unit(["src/foo.py"]),
-      records: [gradeCriterion({ criterion: CRITERION.text, tier: "deterministic", verificationAllPassed: true })],
+      records: [gradeCriterion({ criterion: CRITERION.text, tier: "deterministic", verifierVerdict: "pass" })],
       openGaps: t.store.stateSnapshot().open_gaps,
       integration: {
         store: t.store,

@@ -11,7 +11,18 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { DerivedState, DerivedUnitState, JournalEvent, OpenGap, PlanUnit, UnitId } from "./types";
+import { defaultEnvelopePath } from "./envelope";
+import {
+  AwaitingCandidate,
+  CriterionGradeRef,
+  DerivedState,
+  DerivedUnitState,
+  InFlightIntent,
+  JournalEvent,
+  OpenGap,
+  PlanUnit,
+  UnitId,
+} from "./types";
 import { JournalCorruptionError, readJournalFile, repairJournalTail } from "./journal";
 
 /** Pre-transition phase sentinel for a run that has not recorded a transition. */
@@ -28,6 +39,8 @@ export function emptyDerivedState(): DerivedState {
     units: {},
     in_flight_intents: [],
     open_gaps: [],
+    awaiting_verification: {},
+    criterion_grades: {},
   };
 }
 
@@ -36,7 +49,13 @@ function unitOf(existing: DerivedUnitState | undefined): DerivedUnitState {
   if (existing !== undefined) {
     return existing;
   }
-  return { status: "not_started", takes: 0, rework_cycles: 0, last_acceptance: null };
+  return {
+    status: "not_started",
+    takes: 0,
+    rework_cycles: 0,
+    last_acceptance: null,
+    verifier_attempts: 0,
+  };
 }
 
 function asString(value: unknown): string | null {
@@ -55,6 +74,36 @@ function lastIntentIndex(intents: DerivedState["in_flight_intents"], unitId: Uni
     }
   }
   return -1;
+}
+
+/**
+ * Recover the role of an intent-closing event (KTD5). The in-flight intent's
+ * role is authoritative when present; the event's own `role` field covers
+ * events journaled after the role-aware change; historical roleless events
+ * default to `builder` only when no intent can be correlated.
+ */
+function roleOf(
+  intents: DerivedState["in_flight_intents"],
+  unitId: UnitId,
+  eventRole: unknown,
+  idempotencyKey: string | null,
+): string {
+  for (let i = intents.length - 1; i >= 0; i--) {
+    const intent = intents[i];
+    if (intent.unit_id !== unitId) {
+      continue;
+    }
+    if (idempotencyKey !== null && intent.idempotency_key !== idempotencyKey) {
+      continue;
+    }
+    return intent.role !== "unknown" ? intent.role : "builder";
+  }
+  return typeof eventRole === "string" && eventRole.length > 0 ? eventRole : "builder";
+}
+
+/** True when the event's recorded outcome is a successful termination (R44). */
+function outcomeIsSuccess(payload: Record<string, unknown>): boolean {
+  return asString(payload.outcome) === "success";
 }
 
 /** Remove the latest intent matching a unit (optionally a specific key). */
@@ -86,6 +135,15 @@ function removeIntent(
  * `gap_recorded`/`gap_closed` pair into open gaps; `phase_transition` sets the
  * run phase (R42). Payload values that are missing or malformed are treated as
  * absent — a malformed event never corrupts derived state.
+ *
+ * Role awareness (KTD5): a successful builder termination preserves the
+ * observed candidate handle and derives `awaiting_verification`; a verifier
+ * intent derives `verifying` without incrementing builder takes; verifier
+ * termination returns to `awaiting_verification`, and failed verifier attempts
+ * (launch failures and non-success terminations) count separately from builder
+ * takes and rework cycles. Historical roleless events correlate to their
+ * intent, defaulting to `builder` only when no intent can be correlated;
+ * `reviewer` remains an accepted replay string.
  */
 export function applyEvent(state: DerivedState, event: JournalEvent): DerivedState {
   const next: DerivedState = {
@@ -97,6 +155,8 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
     units: state.units,
     in_flight_intents: state.in_flight_intents,
     open_gaps: state.open_gaps,
+    awaiting_verification: state.awaiting_verification,
+    criterion_grades: state.criterion_grades,
   };
   const p = event;
   switch (event.type) {
@@ -109,10 +169,11 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
       const unitId = asUnitId(p.unit_id);
       if (unitId !== null) {
         const take = typeof p.take === "number" && p.take > 0 ? p.take : 1;
+        const role = asString(p.role) ?? "unknown";
         const intent = {
           seq: event.seq,
           unit_id: unitId,
-          role: asString(p.role) ?? "unknown",
+          role,
           take,
           idempotency_key: asString(p.idempotency_key) ?? `intent-${event.seq}`,
           packet_hash: asString(p.packet_hash) ?? "",
@@ -124,14 +185,17 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
           base_commit: null,
         };
         const unit = unitOf(next.units[unitId]);
+        const verifying = role === "verifier";
         next.in_flight_intents = [...next.in_flight_intents, intent];
         next.units = {
           ...next.units,
           [unitId]: {
-            status: "in_flight",
-            takes: Math.max(unit.takes, take),
+            status: verifying ? "verifying" : "in_flight",
+            // KTD5: verifier intents never increment builder takes.
+            takes: verifying ? unit.takes : Math.max(unit.takes, take),
             rework_cycles: unit.rework_cycles,
             last_acceptance: unit.last_acceptance,
+            verifier_attempts: unit.verifier_attempts,
           },
         };
       }
@@ -158,13 +222,22 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
     case "dispatch_failed": {
       const unitId = asUnitId(p.unit_id);
       if (unitId !== null) {
-        next.in_flight_intents = removeIntent(
-          next.in_flight_intents,
-          unitId,
-          asString(p.idempotency_key),
-        );
+        const key = asString(p.idempotency_key);
+        const role = roleOf(next.in_flight_intents, unitId, p.role, key);
+        next.in_flight_intents = removeIntent(next.in_flight_intents, unitId, key);
         const unit = unitOf(next.units[unitId]);
-        if (unit.status === "in_flight") {
+        if (role === "verifier") {
+          // KTD5: a verifier launch failure is a failed verifier attempt on
+          // the same frozen candidate, never a builder take or a rework cycle.
+          next.units = {
+            ...next.units,
+            [unitId]: {
+              ...unit,
+              status: "awaiting_verification",
+              verifier_attempts: unit.verifier_attempts + 1,
+            },
+          };
+        } else if (unit.status === "in_flight") {
           next.units = {
             ...next.units,
             [unitId]: { ...unit, status: "not_started" },
@@ -176,9 +249,58 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
     case "dispatch_terminated": {
       const unitId = asUnitId(p.unit_id);
       if (unitId !== null) {
-        next.in_flight_intents = removeIntent(next.in_flight_intents, unitId, null);
+        const key = asString(p.idempotency_key);
+        const role = roleOf(next.in_flight_intents, unitId, p.role, key);
+        const closed = next.in_flight_intents.find(
+          (intent) => intent.unit_id === unitId && (key === null || intent.idempotency_key === key),
+        );
+        next.in_flight_intents = removeIntent(next.in_flight_intents, unitId, key);
         const unit = unitOf(next.units[unitId]);
-        if (unit.status === "in_flight") {
+        // KTD8/R17: `reviewer` is the historical name of the verifier role;
+        // a reviewer termination derives the same state as a verifier one
+        // (return to awaiting_verification, preserve the frozen candidate),
+        // so existing reviewer journals replay without clobbering derived
+        // state back to not_started.
+        if (role === "verifier" || role === "reviewer") {
+          // KTD5: verifier termination returns to awaiting_verification until
+          // grade ingestion and acceptance complete; a non-success outcome is
+          // a failed verifier attempt on the frozen candidate.
+          const success = outcomeIsSuccess(p);
+          next.units = {
+            ...next.units,
+            [unitId]: {
+              ...unit,
+              status: "awaiting_verification",
+              verifier_attempts: success ? unit.verifier_attempts : unit.verifier_attempts + 1,
+            },
+          };
+        } else if (role === "builder" && outcomeIsSuccess(p) && closed !== undefined) {
+          // KTD5: successful builder termination preserves the observed
+          // candidate handle and derives awaiting_verification. The candidate
+          // metadata is recovered from the closed intent; the envelope path is
+          // the deterministic role/unit/take default (R43).
+          const candidate: AwaitingCandidate = {
+            take: closed.take,
+            attempt: closed.idempotency_key,
+            agent_id: closed.agent_id,
+            workspace_id: closed.workspace_id,
+            base_commit: closed.base_commit,
+            deadline: closed.deadline,
+            envelope_path: defaultEnvelopePath("builder", unitId, closed.take),
+          };
+          next.awaiting_verification = {
+            ...next.awaiting_verification,
+            [unitId]: candidate,
+          };
+          next.units = {
+            ...next.units,
+            [unitId]: {
+              ...unit,
+              status: "awaiting_verification",
+              takes: Math.max(unit.takes, closed.take),
+            },
+          };
+        } else if (unit.status === "in_flight") {
           next.units = {
             ...next.units,
             [unitId]: { ...unit, status: "not_started" },
@@ -200,10 +322,16 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
               takes: unit.takes,
               rework_cycles: unit.rework_cycles,
               last_acceptance: "accept",
+              verifier_attempts: unit.verifier_attempts,
             },
           };
-          // Acceptance supersedes any open gap on the unit (R48 flow).
+          // Acceptance supersedes any open gap on the unit (R48 flow) and
+          // consumes the awaiting-verification candidate (KTD5).
           next.open_gaps = next.open_gaps.filter((gap) => gap.unit_id !== unitId);
+          if (next.awaiting_verification[unitId] !== undefined) {
+            next.awaiting_verification = { ...next.awaiting_verification };
+            delete next.awaiting_verification[unitId];
+          }
         } else if (decision === "not_accepted") {
           next.units = {
             ...next.units,
@@ -212,6 +340,7 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
               takes: unit.takes,
               rework_cycles: unit.rework_cycles,
               last_acceptance: "not_accepted",
+              verifier_attempts: unit.verifier_attempts,
             },
           };
         }
@@ -259,6 +388,61 @@ export function applyEvent(state: DerivedState, event: JournalEvent): DerivedSta
             takes: unit.takes,
             rework_cycles: unit.rework_cycles + 1,
             last_acceptance: unit.last_acceptance,
+            // A new builder take produces a new candidate: verifier attempts
+            // on the old candidate no longer count (KTD5).
+            verifier_attempts: 0,
+          },
+        };
+        if (next.awaiting_verification[unitId] !== undefined) {
+          next.awaiting_verification = { ...next.awaiting_verification };
+          delete next.awaiting_verification[unitId];
+        }
+      }
+      break;
+    }
+    case "criterion_grades_recorded": {
+      // KTD6: durable grade references; a later event for the same unit
+      // supersedes the earlier one (re-evaluation replaces, never duplicates).
+      const unitId = asUnitId(p.unit_id);
+      if (unitId !== null && Array.isArray(p.grades)) {
+        next.criterion_grades = {
+          ...next.criterion_grades,
+          [unitId]: p.grades as CriterionGradeRef[],
+        };
+      }
+      break;
+    }
+    case "verifier_attempt_failed": {
+      // KTD5: an invalid verifier result (missing/malformed envelope, bad
+      // pointer, candidate mismatch, stale candidate) is a failed verifier
+      // attempt on the same frozen candidate — never a builder take.
+      const unitId = asUnitId(p.unit_id);
+      if (unitId !== null) {
+        const unit = unitOf(next.units[unitId]);
+        next.units = {
+          ...next.units,
+          [unitId]: {
+            ...unit,
+            status: "awaiting_verification",
+            verifier_attempts: unit.verifier_attempts + 1,
+          },
+        };
+      }
+      break;
+    }
+    case "verifier_attempts_reset": {
+      // KTD7: an operator-approved verifier operational escalation resets the
+      // per-candidate verifier-attempt counter so the same frozen candidate
+      // can be retried; never a builder take.
+      const unitId = asUnitId(p.unit_id);
+      if (unitId !== null) {
+        const unit = unitOf(next.units[unitId]);
+        next.units = {
+          ...next.units,
+          [unitId]: {
+            ...unit,
+            status: "awaiting_verification",
+            verifier_attempts: 0,
           },
         };
       }

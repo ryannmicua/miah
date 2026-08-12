@@ -1,7 +1,7 @@
 /**
  * Calibration bar for the `calibrated-judge` grading tier (R74, KTD10, R48).
  *
- * A checker/reviewer profile gains verdict authority only when its calibration
+ * A checker/verifier profile gains verdict authority only when its calibration
  * corpus clears the bar: corpus `>= calibration.min_corpus` (default 15),
  * agreement `> calibration.min_agreement` (default 14/15, strictly greater),
  * false-blocks `<= calibration.max_false_blocks` (default 2), and — mandatory

@@ -45,6 +45,8 @@ export const ESCALATION_TRIGGERS = [
   "unresolved-high-severity-failure",
   /** R82: missing access/credentials/info/operator judgment. */
   "missing-access-or-judgment",
+  /** KTD7: the verifier flagged a criterion as warranting human judgment. */
+  "verifier-flagged-for-human-judgment",
   /** R82: cost ceiling exceeded. */
   "cost-ceiling-exceeded",
   /** R82: no checker profile clears the calibration bar (R48/R20). */
@@ -64,6 +66,21 @@ export interface EscalationSummary {
   criterion: string | null;
   /** Journal seq of the `escalation_raised` event. */
   seq: number;
+  /** KTD7 payload: the flagged criterion's stable ID, when present. */
+  criterion_id: string | null;
+  /** KTD7 payload: the criterion's declared tier, when present. */
+  declared_tier: string | null;
+  /** KTD7 payload: the verifier attempt that raised the flag, when present. */
+  verifier_attempt: string | null;
+  /** KTD7 payload: the verifier's provider/model, when present. */
+  verifier_provider: string | null;
+  verifier_model: string | null;
+  /** KTD7 payload: the verifier's basis for the flag, when present. */
+  basis: string | null;
+  /** KTD7 payload: the evidence package hash the flag cites, when present. */
+  evidence_package_sha256: string | null;
+  /** KTD7 payload: the evidence pointers supporting the flag, when present. */
+  evidence: unknown;
 }
 
 /** Input to raise one escalation (R66, R82). */
@@ -72,6 +89,8 @@ export interface RaiseEscalationInput {
   trigger: string;
   reason: string;
   criterion?: string | null;
+  /** KTD7: structured payload fields ride the event (criterion_id, basis, ...). */
+  payload?: Record<string, unknown>;
 }
 
 export interface RaiseEscalationResult {
@@ -98,12 +117,15 @@ export function raiseEscalation(
     trigger: input.trigger,
     reason: input.reason,
     criterion: input.criterion ?? null,
+    ...(input.payload ?? {}),
   });
   return { event, escalation_id };
 }
 
-/** Map an `escalation_raised` event to its summary shape. */
+/** Map an `escalation_raised` event to its summary shape (KTD7 payload preserved). */
 export function summaryFromEvent(event: JournalEvent): EscalationSummary {
+  const stringOrNull = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
   return {
     escalation_id:
       typeof event.escalation_id === "string" ? event.escalation_id : `esc-${event.seq}`,
@@ -112,6 +134,14 @@ export function summaryFromEvent(event: JournalEvent): EscalationSummary {
     reason: typeof event.reason === "string" ? event.reason : "",
     criterion: typeof event.criterion === "string" ? event.criterion : null,
     seq: event.seq,
+    criterion_id: stringOrNull(event.criterion_id),
+    declared_tier: stringOrNull(event.declared_tier),
+    verifier_attempt: stringOrNull(event.verifier_attempt),
+    verifier_provider: stringOrNull(event.verifier_provider),
+    verifier_model: stringOrNull(event.verifier_model),
+    basis: stringOrNull(event.basis),
+    evidence_package_sha256: stringOrNull(event.evidence_package_sha256),
+    evidence: event.evidence ?? null,
   };
 }
 

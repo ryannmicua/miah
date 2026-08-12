@@ -38,8 +38,8 @@ Paseo v0.3.0-beta.2 gives no post-termination workspace immutability guarantee, 
 
 Each acceptance criterion declares a tier from the D5 ladder (`deterministic | calibrated-judge | human`, `PLAN:R28`; `src/types.ts:159-161`). Grading maps evidence to a verdict per tier (`src/grading.ts:113`, `gradeCriterion`):
 
-- **`deterministic`** — a mechanical pass/fail from the verification-contract exit codes (`src/grading.ts:134-142`). "All passed" → pass; any failure → fail (rework); no evidence → ungraded.
-- **`calibrated-judge`** — a reviewer verdict is authoritative **only when the reviewer's profile clears the calibration bar**; otherwise the verdict is an ungraded input that escalates (`src/grading.ts:149-167`). Reviewer provenance (provider/model) must be recorded, and the calibration lookup for that (provider, model, tier) triple must return `bar_cleared: true`.
+- **`deterministic`** — certified by the verifier from the mechanical verification-contract evidence (commands all-passed, evidence genuine and complete; no calibration authority needed, KD6/KTD6). "All passed" → pass; any failure → fail (rework); no certification → ungraded.
+- **`calibrated-judge`** — a verifier verdict is authoritative **only when the verifier's profile clears the calibration bar**; otherwise the verdict is an ungraded input that escalates (`src/grading.ts`). Verifier provenance (provider/model) must be recorded, and the calibration lookup for that (provider, model, tier) triple must return `bar_cleared: true`.
 - **`human`** — operator judgment is the only authority; the criterion stays ungraded (and escalates) until `miah resolve` supplies a decision (`src/grading.ts:173-181`).
 
 An `ungraded` verdict carries no acceptance authority: the calibrated-judge tier escalates when no profile clears the bar, and the human tier escalates until the operator decides (`PLAN:R48`). Authority ranking: `deterministic` (3) > `calibrated-judge` (2) > `human` (1); `tierMeetsOrExceeds` compares ranks (`src/grading.ts:24-44`), so a higher-tier evidence record satisfies a criterion declared at a lower-or-equal tier.

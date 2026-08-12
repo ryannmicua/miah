@@ -13,7 +13,9 @@ import { createStepRuntime, runStep } from "../src/step";
 import { cleanupTempDirs, fastConfig } from "./helpers";
 import {
   configureTerminalAdapter,
+  defaultVerifierEnvelope,
   makeUnit,
+  passRunner,
   seedBuilderWorktree,
   setupHarness,
   stepContext,
@@ -30,6 +32,8 @@ function driverOptions(h: StepHarness) {
     adapter: h.adapter,
     repoRoot: h.repoRoot,
     canonicalWorktree: h.canonicalWorktree,
+    runCommand: passRunner,
+    verifierEnvelopeFor: defaultVerifierEnvelope,
     now: h.clock.fn,
   };
 }
@@ -125,7 +129,7 @@ describe("driver", () => {
     expect(h.t.store.replay().state.units.U1.status).toBe("accepted");
     const intents = h.t.store.journal
       .readEvents()
-      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U1");
+      .filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U1");
     expect(intents).toHaveLength(2); // take 1 stopped, take 2 fresh
   });
 
@@ -205,7 +209,7 @@ describe("driver", () => {
 
     const events = h.t.store.journal.readEvents();
     const u1Accept = events.find((e) => e.type === "acceptance_decision" && e.unit_id === "U1")?.seq;
-    const u2Intent = events.find((e) => e.type === "dispatch_intent" && e.unit_id === "U2")?.seq;
+    const u2Intent = events.find((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2")?.seq;
     expect(u1Accept as number).toBeLessThan(u2Intent as number);
   });
 
@@ -284,7 +288,7 @@ describe("driver", () => {
     // U2 was re-dispatched (take 2) and completed, not just marked.
     const intents = h.t.store.journal
       .readEvents()
-      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+      .filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2");
     expect(intents).toHaveLength(2);
     const phaseEvents = h.t.store.journal
       .readEvents()
@@ -342,7 +346,7 @@ describe("driver", () => {
     expect(state.units.U1.status).toBe("accepted");
     const intents = h.t.store.journal
       .readEvents()
-      .filter((e) => e.type === "dispatch_intent" && e.unit_id === "U2");
+      .filter((e) => e.type === "dispatch_intent" && e.role === "builder" && e.unit_id === "U2");
     expect(intents).toHaveLength(2);
     expect(h.t.store.lease.holderId()).toBeNull();
   });

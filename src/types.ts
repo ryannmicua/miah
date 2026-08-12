@@ -93,6 +93,13 @@ export type UnitId = string;
 
 /** Acceptance criterion with its grading tier from the D5 ladder (R28). */
 export interface AcceptanceCriterion {
+  /**
+   * Explicit stable criterion ID, e.g. "U1.AC1" (KTD1). The Acceptance
+   * bullets are the sole owner of tier declarations; the verification
+   * contract's criterion mapping references these IDs. `null` when the
+   * bullet carries no `U<num>.AC<num>.` prefix (a structural finding).
+   */
+  id: string | null;
   /** The criterion text as written in the plan's Acceptance block. */
   text: string;
   /**
@@ -100,6 +107,39 @@ export interface AcceptanceCriterion {
    * R47). `null` when the criterion carries no `tier:` declaration.
    */
   tier: string | null;
+}
+
+/** One frozen command in a unit's verification contract (KTD1, R8-R10). */
+export interface VerificationCommand {
+  /** Stable command ID, e.g. "U1.CMD1". */
+  id: string;
+  /** The frozen shell command string run by Miah as the sensor (R2/R15). */
+  command: string;
+}
+
+/** Per-criterion mapping: which commands grade it and named evidence sources (KTD1). */
+export interface CriterionMapping {
+  /**
+   * Command IDs mapped to this criterion. Deterministic criteria require at
+   * least one mapped command; calibrated-judge and human criteria may map
+   * zero commands but still name their evidence source.
+   */
+  commands: string[];
+  /** Named evidence sources (e.g. `verification`, artifact names). */
+  evidence_sources: string[];
+}
+
+/**
+ * A unit's parsed verification contract (KTD1, R8-R11, R15). Parsed once from
+ * the unit's `Verification Contract` block inside the immutable plan snapshot
+ * and persisted into units.json; the sensor's commands always come from this
+ * parsed field, never from a runtime default.
+ */
+export interface VerificationContract {
+  /** Declared commands in declared order. */
+  commands: VerificationCommand[];
+  /** criterion ID (e.g. "U1.AC1") -> commands + evidence sources. */
+  criterion_map: Record<string, CriterionMapping>;
 }
 
 /** One Implementation Unit as parsed into the units.json machine view (R24). */
@@ -134,6 +174,12 @@ export interface PlanUnit {
    * R56(a)); an empty list is a present-but-empty block.
    */
   acceptance: AcceptanceCriterion[] | null;
+  /**
+   * The unit's parsed verification contract (KTD1, R8-R10, R15). `null` when
+   * the unit carries no `Verification Contract` block — preflight rejects
+   * this and admission fails closed (R10).
+   */
+  verificationContract: VerificationContract | null;
 }
 
 /** Parsed CE `ce-unified-plan/v1` document (frontmatter + units view). */
@@ -214,6 +260,9 @@ export const JOURNAL_EVENT_TYPES = [
   "custody_continuity_record",
   "result_envelope_observed",
   "acceptance_decision",
+  "criterion_grades_recorded",
+  "verifier_attempt_failed",
+  "verifier_attempts_reset",
   "gap_recorded",
   "gap_closed",
   "rework_started",
@@ -242,7 +291,37 @@ export interface JournalEvent {
 }
 
 /** Per-unit state statuses (R64, R42). */
-export type UnitStatus = "accepted" | "in_flight" | "rework" | "blocked" | "not_started";
+export type UnitStatus =
+  | "accepted"
+  | "in_flight"
+  | "rework"
+  | "blocked"
+  | "not_started"
+  | "awaiting_verification"
+  | "verifying";
+
+/**
+ * The preserved builder candidate awaiting verifier dispatch (KTD5). Derived
+ * from a successful builder `dispatch_terminated`; the verifier attaches to
+ * the same workspace and the same candidate identity, and the record survives
+ * until acceptance or rework starts.
+ */
+export interface AwaitingCandidate {
+  /** The builder take this candidate was produced on. */
+  take: number;
+  /** The builder's idempotency key (attempt). */
+  attempt: string;
+  /** Observed agent id of the builder dispatch (R37). */
+  agent_id: string | null;
+  /** Observed workspace id of the builder dispatch (KTD3). */
+  workspace_id: string | null;
+  /** Base commit the builder started from (A6). */
+  base_commit: string | null;
+  /** Recorded dispatch deadline (R5). */
+  deadline: string;
+  /** Result-envelope path relative to the candidate worktree (R43). */
+  envelope_path: string;
+}
 
 /**
  * A dispatch intent reconstructed from the journal that has no terminal
@@ -278,6 +357,13 @@ export interface DerivedUnitState {
   takes: number;
   rework_cycles: number;
   last_acceptance: "accept" | "not_accepted" | null;
+  /**
+   * Failed verifier attempts on the current frozen candidate (KTD5): verifier
+   * launch failures and invalid verifier results are counted separately from
+   * builder takes and rework cycles, and the `run.max_takes` ceiling applies
+   * to them per candidate.
+   */
+  verifier_attempts: number;
 }
 
 /**
@@ -296,14 +382,47 @@ export interface DerivedState {
   units: Record<UnitId, DerivedUnitState>;
   in_flight_intents: InFlightIntent[];
   open_gaps: OpenGap[];
+  /**
+   * Preserved builder candidates awaiting verifier dispatch, keyed by unit
+   * (KTD5). A successful builder termination moves the closed intent here so
+   * replay can resume package composition and verifier dispatch without a
+   * second builder take.
+   */
+  awaiting_verification: Record<UnitId, AwaitingCandidate>;
+  /**
+   * Durable per-criterion grades (KTD6): verifier envelope entries and
+   * operator decisions are the only sources of `CriterionGrade`, and grades
+   * are journaled as durable references so resume re-evaluates acceptance
+   * without parsing specialist prose.
+   */
+  criterion_grades: Record<UnitId, CriterionGradeRef[]>;
+}
+
+/** A durable per-criterion grade reference (KTD6). */
+export interface CriterionGradeRef {
+  /** The criterion's stable ID (KTD1). */
+  criterion_id: string;
+  /** The acceptance criterion text this verdict speaks to. */
+  criterion: string;
+  /** The tier the evidence actually occupied (R47 ladder). */
+  tier: string;
+  grade: "pass" | "fail" | "ungraded";
+  route: "escalate" | "rework" | null;
+  /** Audit basis: what supported (or withheld) this grade. */
+  basis: string;
+  /** `verifier` (envelope entry) or `operator` (resolve decision) — the only sources (KD1/KD6). */
+  source: "verifier" | "operator";
 }
 
 /**
- * Miah specialist roles (D8-i, R7-R11). Each specialist is a separately
+ * Miah specialist roles (D8-i, R7-R11, KTD8). Each specialist is a separately
  * addressable external agent session created through the Paseo lifecycle
- * adapter (R7); U5 dispatches one such specialist per unit attempt.
+ * adapter (R7); U5 dispatches one such specialist per unit attempt. `verifier`
+ * replaces the former `reviewer` as the active conformity/grading role (KD3,
+ * R17); historical journals keep `reviewer` as a readable string in durable
+ * readers, but no new dispatch can use it.
  */
-export type SpecialistRole = "planner" | "builder" | "tester" | "reviewer";
+export type SpecialistRole = "planner" | "builder" | "tester" | "verifier";
 
 /**
  * Role-to-model defaults (D8-i). Miah maps each role to a Paseo role plus a
@@ -311,7 +430,9 @@ export type SpecialistRole = "planner" | "builder" | "tester" | "reviewer";
  * `~/.paseo/orchestration-preferences.json` when present (D8-i). The D8-i
  * table's "Provider/Model" cells carry the paseo `--provider` name and the
  * full model id (the live CLI probe in U4 confirmed `--provider opencode` with
- * model `opencode-go/deepseek-v4-flash`).
+ * model `opencode-go/deepseek-v4-flash`). The verifier's default replaces the
+ * reviewer's entry (R14/R17): Paseo `audit` with operator preferences
+ * overriding provider, model, and role.
  */
 export const D8I_ROLE_DEFAULTS: Record<
   SpecialistRole,
@@ -320,5 +441,5 @@ export const D8I_ROLE_DEFAULTS: Record<
   planner: { paseo_role: "planning", provider: "codex", model: "gpt-5.6-sol" },
   builder: { paseo_role: "impl", provider: "opencode", model: "opencode-go/deepseek-v4-flash" },
   tester: { paseo_role: "audit", provider: "opencode", model: "opencode-go/glm-5.2" },
-  reviewer: { paseo_role: "audit", provider: "opencode", model: "opencode-go/glm-5.2" },
+  verifier: { paseo_role: "audit", provider: "opencode", model: "opencode-go/glm-5.2" },
 };

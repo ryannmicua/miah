@@ -63,8 +63,8 @@ describe("replay", () => {
     expect(state.phase).toBe("Reviewing");
     expect(state.terminal).toBeNull();
 
-    expect(state.units.U1).toEqual({ status: "accepted", takes: 1, rework_cycles: 0, last_acceptance: "accept" });
-    expect(state.units.U2).toEqual({ status: "accepted", takes: 2, rework_cycles: 1, last_acceptance: "accept" });
+    expect(state.units.U1).toEqual({ status: "accepted", takes: 1, rework_cycles: 0, last_acceptance: "accept", verifier_attempts: 0 });
+    expect(state.units.U2).toEqual({ status: "accepted", takes: 2, rework_cycles: 1, last_acceptance: "accept", verifier_attempts: 0 });
     // U3 has an open intent and no created/terminated: still in flight.
     expect(state.units.U3).toMatchObject({ status: "in_flight", takes: 1 });
 
@@ -96,8 +96,12 @@ describe("replay", () => {
       { unit_id: "U2", criterion: "c1", reason: "missing test output", recorded_seq: 8 },
     ]);
     expect(state.units.U1.status).toBe("accepted");
-    expect(state.units.U2.status).toBe("not_started"); // failed take 1, terminated take 2, not yet accepted
+    // U2's second take terminated successfully but was never accepted: the
+    // candidate now awaits verification (KTD5), not a fresh builder dispatch.
+    expect(state.units.U2.status).toBe("awaiting_verification");
     expect(state.units.U2.rework_cycles).toBe(1);
+    expect(state.units.U2.verifier_attempts).toBe(0);
+    expect(state.awaiting_verification.U2).toMatchObject({ take: 2, attempt: "k-U2-2", agent_id: "ag-2", workspace_id: "ws-2", base_commit: "bc-2" });
     expect(state.units.U3.status).toBe("blocked"); // U3 depends on U2, which is not accepted
   });
 
@@ -165,7 +169,7 @@ describe("replay", () => {
     expect(JSON.stringify(replay.state)).toBe(JSON.stringify(full));
     expect(replay.state.seq).toBe(101);
     for (const unit of ["U1", "U2", "U3"]) {
-      expect(["accepted", "in_flight", "rework", "blocked", "not_started"]).toContain(
+      expect(["accepted", "in_flight", "rework", "blocked", "not_started", "awaiting_verification", "verifying"]).toContain(
         replay.state.units[unit]?.status,
       );
     }
@@ -252,6 +256,183 @@ describe("replay", () => {
       units: {},
       in_flight_intents: [],
       open_gaps: [],
+      awaiting_verification: {},
+      criterion_grades: {},
     });
+  });
+});
+
+describe("role-aware dispatch replay (KTD5)", () => {
+  const intent = (unit: string, take: number, role = "builder") => ({
+    unit_id: unit,
+    role,
+    take,
+    idempotency_key: `k-${unit}-${take}`,
+    packet_hash: "ph",
+    deadline: "deadline",
+    provider: "codex",
+    model: "gpt-5.4",
+  });
+
+  it("U2.AC1: a successful builder termination preserves the candidate and derives awaiting_verification", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1", base_commit: "bc-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.units.U1.takes).toBe(1);
+    expect(state.awaiting_verification.U1).toEqual({
+      take: 1,
+      attempt: "k-U1-1",
+      agent_id: "ag-1",
+      workspace_id: "ws-1",
+      base_commit: "bc-1",
+      deadline: "deadline",
+      envelope_path: ".miah/envelope-builder-U1-t1.json",
+    });
+    expect(state.in_flight_intents).toHaveLength(0);
+  });
+
+  it("U2.AC1: a non-success builder termination does not preserve a candidate", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "envelope-missing", idempotency_key: "k-U1-1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("not_started");
+    expect(state.awaiting_verification.U1).toBeUndefined();
+  });
+
+  it("U2.AC2: verifier intent derives verifying without incrementing builder takes", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(4, "dispatch_intent", intent("U1", 1, "verifier")),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("verifying");
+    expect(state.units.U1.takes).toBe(1);
+    expect(state.awaiting_verification.U1).toBeDefined();
+    expect(state.in_flight_intents).toHaveLength(1);
+    expect(state.in_flight_intents[0].role).toBe("verifier");
+  });
+
+  it("U2.AC2: verifier termination returns to awaiting_verification; launch failures count as verifier attempts, not builder takes", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(4, "dispatch_intent", intent("U1", 1, "verifier")),
+      makeEvent(5, "dispatch_failed", { unit_id: "U1", role: "verifier", idempotency_key: "k-U1-1" }),
+      makeEvent(6, "dispatch_intent", intent("U1", 1, "verifier")),
+      makeEvent(7, "dispatch_created", { unit_id: "U1", agent_id: "ag-v", workspace_id: "ws-1" }),
+      makeEvent(8, "dispatch_terminated", { unit_id: "U1", outcome: "invalid-result", idempotency_key: "k-U1-1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.units.U1.takes).toBe(1); // builder takes unchanged
+    expect(state.units.U1.rework_cycles).toBe(0); // no rework from verifier attempts
+    expect(state.units.U1.verifier_attempts).toBe(2);
+    expect(state.awaiting_verification.U1).toMatchObject({ take: 1, workspace_id: "ws-1" });
+    expect(state.in_flight_intents).toHaveLength(0);
+  });
+
+  it("U2.AC2: a valid verifier success does not count as a failed attempt", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(4, "dispatch_intent", intent("U1", 1, "verifier")),
+      makeEvent(5, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.units.U1.verifier_attempts).toBe(0);
+  });
+
+  it("U2.AC3: roleless historical events correlate to their intent and derive builder semantics", () => {
+    // Historical journal: intent carries role; created/terminated do not.
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1", base_commit: "bc-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.awaiting_verification.U1).toMatchObject({ take: 1, agent_id: "ag-1" });
+  });
+
+  it("U2.AC3: roleless historical events without a correlatable intent default to builder, not awaiting", () => {
+    // A lone historical terminated with no intent and no outcome: the KTD5
+    // builder fallback applies, but a missing outcome never preserves a
+    // candidate.
+    const events = [makeEvent(1, "dispatch_terminated", { unit_id: "U1" })];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("not_started");
+    expect(state.awaiting_verification.U1).toBeUndefined();
+  });
+
+  it("U2.AC3: historical reviewer journals remain readable and replayable", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1, "reviewer")),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-r", workspace_id: "ws-r" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    // Reviewer is the historical verifier (KTD8/R17): a reviewer termination
+    // derives verifier semantics — the unit returns to awaiting_verification
+    // and is never reset to not_started. No builder candidate exists in this
+    // journal, so none is preserved.
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.awaiting_verification.U1).toBeUndefined();
+    expect(state.in_flight_intents).toHaveLength(0);
+  });
+
+  it("U2.AC3: a historical reviewer termination does not clobber the awaiting-verification candidate", () => {
+    // Builder take 1 preserves the frozen candidate; the historical reviewer
+    // (pre-rename verifier) terminates after it. The reviewer termination must
+    // replay as verifier-equivalent: candidate preserved, unit stays
+    // awaiting_verification, never reset to not_started (R17/KTD8).
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_created", { unit_id: "U1", agent_id: "ag-1", workspace_id: "ws-1", base_commit: "bc-1" }),
+      makeEvent(3, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(4, "dispatch_intent", intent("U1", 1, "reviewer")),
+      makeEvent(5, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("awaiting_verification");
+    expect(state.awaiting_verification.U1).toMatchObject({ take: 1, attempt: "k-U1-1", agent_id: "ag-1" });
+    expect(state.units.U1.takes).toBe(1); // reviewer termination never adds a builder take
+    expect(state.in_flight_intents).toHaveLength(0);
+  });
+
+  it("U2.AC3: rework_started consumes the candidate and resets verifier attempts", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(3, "dispatch_intent", intent("U1", 1, "verifier")),
+      makeEvent(4, "dispatch_failed", { unit_id: "U1", role: "verifier", idempotency_key: "k-U1-1" }),
+      makeEvent(5, "rework_started", { unit_id: "U1" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("rework");
+    expect(state.units.U1.verifier_attempts).toBe(0);
+    expect(state.awaiting_verification.U1).toBeUndefined();
+  });
+
+  it("acceptance consumes the candidate", () => {
+    const events = [
+      makeEvent(1, "dispatch_intent", intent("U1", 1)),
+      makeEvent(2, "dispatch_terminated", { unit_id: "U1", outcome: "success", idempotency_key: "k-U1-1" }),
+      makeEvent(3, "acceptance_decision", { unit_id: "U1", decision: "accept" }),
+    ];
+    const state = deriveState(events, { units: makeUnits() });
+    expect(state.units.U1.status).toBe("accepted");
+    expect(state.awaiting_verification.U1).toBeUndefined();
   });
 });

@@ -13,7 +13,9 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** Exercise the Miah plan parser and preflight against a plan
-  with deliberate violations across all three check classes (R56).
+  with deliberate violations across all three check classes (R56). Every unit
+  carries a valid verification contract (KTD1) so only the intended violations
+  fire.
 
 ## Implementation Units
 
@@ -36,8 +38,12 @@ execution: code
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - `src/shared.ts` exists — `tier: deterministic`
+  - U1.AC1. `src/shared.ts` exists — `tier: deterministic`
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U1.CMD1` = `npm test`
+  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U2. Missing creates
 
@@ -47,8 +53,12 @@ execution: code
 - **inputs:** `src/foo.py`
 - **depends-on:** U1
 - **Acceptance:**
-  - The consumer works — `tier: deterministic`
+  - U2.AC1. The consumer works — `tier: deterministic`
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U2.CMD1` = `npm test`
+  - **Criterion mapping:** `U2.AC1` -> `U2.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U3. Conflicting creates
 
@@ -59,8 +69,12 @@ execution: code
 - **inputs:** none
 - **depends-on:** none
 - **Acceptance:**
-  - The shared module works
+  - U3.AC1. The shared module works
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U3.CMD1` = `npm test`
+  - **Criterion mapping:** `U3.AC1` -> `U3.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U4. Cycle partner A
 
@@ -71,8 +85,12 @@ execution: code
 - **inputs:** none
 - **depends-on:** U5
 - **Acceptance:**
-  - `src/a.ts` exists — `tier: deterministic`
+  - U4.AC1. `src/a.ts` exists — `tier: deterministic`
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U4.CMD1` = `npm test`
+  - **Criterion mapping:** `U4.AC1` -> `U4.CMD1`
+  - **Evidence sources:** `verification`
 
 ### U5. Cycle partner B
 
@@ -83,5 +101,9 @@ execution: code
 - **inputs:** none
 - **depends-on:** U4
 - **Acceptance:**
-  - `src/b.ts` exists — `tier: deterministic`
+  - U5.AC1. `src/b.ts` exists — `tier: deterministic`
 - **Verification:** `npm test` passes.
+- **Verification Contract:**
+  - **Commands:** `U5.CMD1` = `npm test`
+  - **Criterion mapping:** `U5.AC1` -> `U5.CMD1`
+  - **Evidence sources:** `verification`

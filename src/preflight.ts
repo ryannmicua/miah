@@ -18,7 +18,7 @@
  */
 import { parsePlan } from "./parser";
 import { isGradingTier } from "./grading";
-import { ParsedPlan, UnitId } from "./types";
+import { AcceptanceCriterion, ParsedPlan, PlanUnit, UnitId } from "./types";
 
 /** Check classes (R56). */
 export type PreflightClass = "structural" | "referential" | "verifiability";
@@ -167,6 +167,11 @@ export function structuralPreflight(plan: ParsedPlan): PreflightFinding[] {
         );
       }
     }
+
+    // Verification contract shape (KTD1, R8-R10): the unit's contract is
+    // frozen in the plan snapshot, must be present and non-empty, and must
+    // reference only real criteria and commands.
+    findings.push(...verificationContractFindings(unit));
   }
 
   // Acyclic dependency graph (R56(a)). Emit one finding per cycle member so
@@ -180,6 +185,148 @@ export function structuralPreflight(plan: ParsedPlan): PreflightFinding[] {
         `Unit ${member} is part of a dependency cycle.`,
       ),
     );
+  }
+
+  return findings;
+}
+
+/**
+ * Verification-contract structural findings for one unit (KTD1, R8-R10).
+ *
+ * Fail-closed checks, each naming the unit:
+ *   - absent `Verification Contract` block        -> missing-verification-contract
+ *   - zero total commands                          -> zero-verification-commands
+ *   - duplicate command IDs                        -> duplicate-command-id
+ *   - acceptance bullets without stable IDs        -> missing-criterion-id
+ *   - duplicate criterion IDs                      -> duplicate-criterion-id
+ *   - criterion mapping key not in Acceptance      -> unknown-criterion-reference
+ *   - mapping references an undeclared command     -> unknown-command-reference
+ *   - acceptance criterion absent from the map     -> unmapped-criterion
+ *   - deterministic criterion with no command      -> deterministic-criterion-no-command
+ *
+ * Quality is not scored: presence, references, mapping completeness, and the
+ * deterministic-criterion command rule are all that is enforced (KTD1).
+ */
+export function verificationContractFindings(unit: PlanUnit): PreflightFinding[] {
+  const findings: PreflightFinding[] = [];
+  const contract = unit.verificationContract;
+
+  // Acceptance-bullet ID checks are independent of contract presence: every
+  // criterion needs a stable ID for the verifier to grade it (KTD1/KTD4).
+  const criterionById = new Map<string, AcceptanceCriterion>();
+  const criterionIds = new Set<string>();
+  for (const criterion of unit.acceptance ?? []) {
+    if (criterion.id === null) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "missing-criterion-id",
+          `Unit ${unit.id} acceptance criterion "${criterion.text}" has no stable U<num>.AC<num> ID (KTD1).`,
+        ),
+      );
+      continue;
+    }
+    if (criterionIds.has(criterion.id)) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "duplicate-criterion-id",
+          `Unit ${unit.id} declares acceptance criterion ${criterion.id} more than once (KTD1).`,
+        ),
+      );
+    }
+    criterionIds.add(criterion.id);
+    criterionById.set(criterion.id, criterion);
+  }
+
+  if (contract === null || contract === undefined) {
+    findings.push(
+      finding(
+        unit.id,
+        "structural",
+        "missing-verification-contract",
+        `Unit ${unit.id} has no Verification Contract block (R10, KTD1).`,
+      ),
+    );
+    return findings;
+  }
+  if (contract.commands.length === 0) {
+    findings.push(
+      finding(
+        unit.id,
+        "structural",
+        "zero-verification-commands",
+        `Unit ${unit.id} verification contract declares zero commands (R10, KTD1).`,
+      ),
+    );
+  }
+
+  const commandIds = new Set<string>();
+  for (const command of contract.commands) {
+    if (commandIds.has(command.id)) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "duplicate-command-id",
+          `Unit ${unit.id} verification contract declares command ${command.id} more than once (KTD1).`,
+        ),
+      );
+    }
+    commandIds.add(command.id);
+  }
+
+  const mappedCriterionIds = new Set<string>();
+  for (const [criterionId, mapping] of Object.entries(contract.criterion_map)) {
+    mappedCriterionIds.add(criterionId);
+    const criterion = criterionById.get(criterionId);
+    if (criterion === undefined) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "unknown-criterion-reference",
+          `Unit ${unit.id} verification contract maps unknown criterion ${criterionId} (KTD1).`,
+        ),
+      );
+    }
+    for (const commandId of mapping.commands) {
+      if (!commandIds.has(commandId)) {
+        findings.push(
+          finding(
+            unit.id,
+            "structural",
+            "unknown-command-reference",
+            `Unit ${unit.id} verification contract maps criterion ${criterionId} to undeclared command ${commandId} (KTD1).`,
+          ),
+        );
+      }
+    }
+    if (criterion !== undefined && criterion.tier === "deterministic" && mapping.commands.length === 0) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "deterministic-criterion-no-command",
+          `Unit ${unit.id} deterministic criterion ${criterionId} maps no command (KTD1).`,
+        ),
+      );
+    }
+  }
+
+  for (const criterionId of criterionIds) {
+    if (!mappedCriterionIds.has(criterionId)) {
+      findings.push(
+        finding(
+          unit.id,
+          "structural",
+          "unmapped-criterion",
+          `Unit ${unit.id} acceptance criterion ${criterionId} is not mapped in the verification contract (KTD1).`,
+        ),
+      );
+    }
   }
 
   return findings;

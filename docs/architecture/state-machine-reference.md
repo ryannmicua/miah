@@ -16,7 +16,7 @@ Source: `src/fsm.ts:37-46` (`RUN_PHASES`); meanings per `PLAN:KTD14`.
 | `Admitting` | Preflight + substrate probe + lease acquisition | no `phase_transition` — the admission gate itself (represented by `run_start`) | admission (`src/admission.ts:203`) |
 | `Ready` | Lease held, units parsed, no work dispatched yet | `phase_transition` | sentinel/`Admitting`/`Stopping` → `Ready` (`src/driver.ts:378-384`) |
 | `Implementing` | Builder(s) dispatched for eligible units | `phase_transition` | first dispatch (`src/step.ts:478`); any step with in-flight work (`src/step.ts:567-568`) |
-| `Reviewing` | Tester/reviewer dispatched for a frozen candidate | `phase_transition` | terminated builder poll (`src/step.ts:550`); step with a harvested candidate (`src/step.ts:569-570`) |
+| `Reviewing` | Verifier dispatched for a frozen candidate | `phase_transition` | terminated builder poll (`src/step.ts`); step with a harvested or awaiting-verification candidate |
 | `AwaitingApproval` | All units accepted, approval package written, awaiting operator | `phase_transition` | all units accepted (`src/step.ts:565-566`; `src/driver.ts:417-420`) |
 | `Attention` | Escalation raised, run paused, awaiting operator resolve | `phase_transition` | any escalation (`src/step.ts:561-562`, `src/driver.ts:436-437`) |
 | `Stopping` | Operator issued stop, terminating in-flight, releasing lease | `phase_transition` | stop flag honored (`src/driver.ts:226`) |

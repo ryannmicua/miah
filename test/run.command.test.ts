@@ -15,6 +15,7 @@ import { fastConfig, cleanupTempDirs, makeTempDir } from "./helpers";
 import { makeFakeProbe } from "./fixtures/fake-substrate-probe";
 import { ScriptedAdapter } from "./helpers/scripted-adapter";
 import {
+  defaultVerifierEnvelope,
   inspectResult,
   passRunner,
   seedBuilderWorktree,
@@ -38,7 +39,11 @@ const PLAN = [
   "- **inputs:** none",
   "- **depends-on:** none",
   "- **Acceptance:**",
-  "  - `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "  - U1.AC1. `src/hello.ts` exists and is exported — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
   "",
 ].join("\n");
 
@@ -128,6 +133,7 @@ describe("run command", () => {
       canonicalWorktree: run.canonicalWorktree,
       runCommand: passRunner,
       verificationCommandsFor: () => ["npm test"],
+      verifierEnvelopeFor: defaultVerifierEnvelope,
     });
 
     expect(code).toBe(0);
@@ -136,7 +142,41 @@ describe("run command", () => {
     expect(fs.existsSync(approval)).toBe(true);
   });
 
-  it("miah run --once advances one step (exit 0) and the next --once completes (D6-a, U8.10)", async () => {
+  it("U5.AC7: the production run path sources commands from the parsed contract (no runtime default)", async () => {
+    const run = await admit();
+    const logs = captureLogs();
+    const adapter = adapterFor(run);
+    const seenCommands: string[] = [];
+    // No verificationCommandsFor is passed: the production default reads the
+    // unit's parsed frozen contract (R15, KTD1).
+    const code = await runCommand(run.runId, {
+      adapter,
+      basePath: run.basePath,
+      holderId: run.holderId,
+      config: run.config,
+      workspaceRoot: run.worktree,
+      canonicalWorktree: run.canonicalWorktree,
+      runCommand: async (command, cwd) => {
+        seenCommands.push(command);
+        return { command, exit_code: 0, stdout: "ok\n", stderr: "" };
+      },
+      verifierEnvelopeFor: defaultVerifierEnvelope,
+    });
+    expect(code).toBe(0);
+    expect(logs.stdout.join("\n")).toContain("run complete");
+    // The sensor ran exactly the snapshot contract's command (`npm test` from
+    // the plan's Verification Contract block) — never an empty default.
+    expect(seenCommands).toContain("npm test");
+    const state = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: "read-holder",
+    }).replay().state;
+    expect(state.units.U1.status).toBe("accepted");
+  });
+
+  it("miah run --once advances one step (exit 0) and the next --once completes (D6-a, U10.8)", async () => {
     const run = await admit();
     const adapter = adapterFor(run, "running");
     const baseOpts = {
@@ -145,6 +185,8 @@ describe("run command", () => {
       config: run.config,
       workspaceRoot: run.worktree,
       canonicalWorktree: run.canonicalWorktree,
+      runCommand: passRunner,
+      verifierEnvelopeFor: defaultVerifierEnvelope,
     };
 
     const firstLogs = captureLogs();
