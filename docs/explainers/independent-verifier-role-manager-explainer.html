@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Miah stops judging: the independent verifier, explained</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 2rem 1rem; line-height: 1.6; }
+  main { max-width: 70ch; margin: 0 auto; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin-bottom: .25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2.5rem; border-top: 1px solid #8884; padding-top: 1.25rem; }
+  h3 { font-size: 1.05rem; margin-top: 1.5rem; }
+  .meta { background: #8881; border-radius: 8px; padding: .75rem 1rem; font-size: .85rem; margin: 1rem 0 2rem; }
+  .meta dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: .15rem 1rem; }
+  .meta dt { font-weight: 600; }
+  .meta dd { margin: 0; }
+  .lead { font-size: 1.1rem; }
+  figure { margin: 1.5rem 0; }
+  figcaption { font-size: .85rem; color: #888; margin-top: .5rem; }
+  .diagram { width: 100%; height: auto; background: #f6f6f6; border-radius: 10px; padding: .5rem 0; }
+  @media (prefers-color-scheme: dark) { .diagram { background: #1c1c1e; } }
+  code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .9em; background: #8881; padding: .1em .35em; border-radius: 4px; }
+  .tl { list-style: none; padding: 0; margin: 1.5rem 0; }
+  .tl li { position: relative; padding: 0 0 1.5rem 1.75rem; border-left: 2px solid #8885; margin-left: .5rem; }
+  .tl li:last-child { border-left-color: transparent; }
+  .tl li::before { content: ""; position: absolute; left: -7px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: #6366f1; }
+  .tl .when { font-size: .8rem; color: #888; text-transform: uppercase; letter-spacing: .05em; }
+  .caveat { background: #ffd33d18; border-left: 4px solid #d9a400; padding: .75rem 1rem; border-radius: 0 8px 8px 0; margin: 1.25rem 0; }
+  footer { margin-top: 3rem; font-size: .8rem; color: #888; border-top: 1px solid #8884; padding-top: 1rem; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Miah stops judging: the independent verifier, explained</h1>
+
+<div class="meta">
+  <dl>
+    <dt>Date</dt><dd>2026-08-12</dd>
+    <dt>Input shape</dt><dd>recap</dd>
+    <dt>Subject</dt><dd>independent-verifier-role — PR #9 on miah, 2026-08-11</dd>
+    <dt>Rendered for</dt><dd>a non-technical manager</dd>
+  </dl>
+</div>
+
+<p class="lead">Miah is a piece of software that supervises AI agents doing planned engineering work: it validates the plan, dispatches specialist agents, collects evidence of what they actually did, and decides when a unit of work is done. This explainer covers one change to Miah — the one delivered in pull request #9 — in plain language.</p>
+
+<p><strong>The change in one sentence:</strong> Miah used to both run the checks <em>and</em> judge the results. Now it only runs the checks. A separate specialist — the <strong>verifier</strong> — does the judging, and anything that needs human judgment goes to a human.</p>
+
+<h2>The idea: separate the referee from the player</h2>
+
+<p>The principle behind the change is old and simple: <strong>the person who decides should not be the same mechanism that performs the work.</strong> In a sport, the referee is not on the team. The same logic applies to AI-run work — if the software that coordinates the work also grades the work, there is no independent second set of eyes on its own evidence discipline.</p>
+
+<p>Miah had been doing both jobs: it ran verification checks (the "sensing") and it also mechanically graded the results (the "judging"). That concentration of judgment is what this change removes.</p>
+
+<figure>
+<svg class="diagram" viewBox="0 0 720 300" role="img" aria-label="Before and after diagram of how grading works in Miah">
+  <style>
+    .bx { fill:#fff; stroke:#6366f1; stroke-width:2; rx:10; }
+    .bx-old { stroke:#999; }
+    .ar { stroke:#666; stroke-width:2; marker-end:url(#arr); }
+    .lbl { font: 12px system-ui, sans-serif; fill:#222; }
+    .lbl-old { fill:#999; }
+    .t { font: 700 13px system-ui, sans-serif; fill:#6366f1; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#666"/></marker>
+  </defs>
+
+  <text x="180" y="28" text-anchor="middle" class="t">Before — one actor does everything</text>
+  <rect class="bx bx-old" x="90" y="45" width="180" height="46"/>
+  <text x="180" y="73" text-anchor="middle" class="lbl lbl-old">Miah (senses + judges)</text>
+  <rect class="bx bx-old" x="90" y="140" width="180" height="46"/>
+  <text x="180" y="168" text-anchor="middle" class="lbl lbl-old">Result: accept / rework</text>
+  <line class="ar" x1="180" y1="91" x2="180" y2="140"/>
+
+  <text x="540" y="28" text-anchor="middle" class="t">After — roles are separated</text>
+  <rect class="bx" x="450" y="45" width="180" height="46"/>
+  <text x="540" y="62" text-anchor="middle" class="lbl">Miah (senses only)</text>
+  <text x="540" y="79" text-anchor="middle" class="lbl lbl-old">runs checks, collects evidence</text>
+  <rect class="bx" x="450" y="130" width="180" height="46"/>
+  <text x="540" y="147" text-anchor="middle" class="lbl">Verifier specialist (judges)</text>
+  <text x="540" y="164" text-anchor="middle" class="lbl lbl-old">grades every criterion</text>
+  <rect class="bx" x="450" y="215" width="180" height="46"/>
+  <text x="540" y="232" text-anchor="middle" class="lbl">Human operator (human judgment)</text>
+  <text x="540" y="249" text-anchor="middle" class="lbl lbl-old">grades what needs a person</text>
+  <line class="ar" x1="540" y1="91" x2="540" y2="130"/>
+  <line class="ar" x1="540" y1="176" x2="540" y2="215"/>
+
+  <text x="360" y="290" text-anchor="middle" class="lbl lbl-old">The referee is never on the team.</text>
+</svg>
+<figcaption>Before: one actor senses and judges. After: Miah senses, the verifier judges, the human handles judgment calls.</figcaption>
+</figure>
+
+<h2>Why this matters</h2>
+
+<p>Three concrete problems motivated the change:</p>
+
+<ul>
+  <li><strong>Concentrated judgment.</strong> When the coordinator also grades, nobody independently checks the coordinator's own evidence discipline. A verifier that always passes is worse than no verifier — but so is a supervisor whose pass/fail calls are never questioned by anyone.</li>
+  <li><strong>Checks written after the work.</strong> Previously, verification checks could be written after implementation, which lets the checks quietly chase whatever the work happened to do. The change makes the checks exist <em>first</em>: the plan now carries a frozen "verification contract" for each unit of work — the specific checks the work will be graded against — approved before any implementation starts.</li>
+  <li><strong>No second set of eyes.</strong> The grading decisions needed an independent reviewer. The change folds the old "reviewer" role into a single <strong>verifier</strong> specialist with the authority to grade everything — and to flag anything as needing a human.</li>
+</ul>
+
+<h2>How it works now</h2>
+
+<h3>1. The checks are frozen before the work</h3>
+<p>At planning time, each unit of work gets a <strong>verification contract</strong>: the exact checks (commands) it will be graded against, plus stable identifiers for each acceptance criterion. The contract rides inside the immutable plan snapshot. A unit without a contract is refused admission up front — <em>fail closed</em>. Changing a contract after approval is treated as a scope change requiring operator approval.</p>
+
+<h3>2. Miah senses, the verifier judges</h3>
+<p>During execution, Miah runs the frozen checks and collects evidence (build outputs, test results, file changes) into a tamper-evident, hash-chained record — the <strong>custody chain</strong>. It then dispatches the verifier specialist, read-only, with the evidence package and the frozen contract. The verifier grades every non-human criterion and returns a structured envelope with one grade per criterion: <code>pass</code>, <code>fail</code>, or <code>ungraded</code>, each with a stated basis and pointers to the evidence it relied on. Miah itself produces no grade.</p>
+
+<h3>3. Human judgment goes to a human</h3>
+<p>Three paths send a criterion to the operator:</p>
+<ul>
+  <li>Criteria declared <code>human</code> tier in the plan are graded by the operator from the start.</li>
+  <li>The verifier may flag any criterion as warranting human judgment.</li>
+  <li>Judgment grades only carry authority when the verifier's profile clears a configured calibration bar; otherwise the criterion stays ungraded and escalates.</li>
+</ul>
+<p>An operator grade is the only thing that satisfies a <code>human</code>-tier criterion. Grading is now criterion-level: resolving one criterion can no longer accidentally accept a whole unit while another criterion is still unsatisfied.</p>
+
+<h3>4. Failures never waste work</h3>
+<p>If a verifier attempt fails (bad envelope, missing evidence, unreachable workspace), it counts as a <em>verifier attempt</em> — it never spends a builder's implementation attempt. Runs remain resumable: a crash mid-verification resumes from the journal and evidence, not from scratch.</p>
+
+<h2>What happened in this window of work</h2>
+
+<ul class="tl">
+  <li>
+    <div class="when">2026-08-09</div>
+    <strong>Plan written.</strong> A product contract for the independent verifier role was drafted and reviewed (planner, with an early review loop catching a critical sequencing fact: specialist dispatch was builder-only at the time).
+  </li>
+  <li>
+    <div class="when">2026-08-11</div>
+    <strong>Implementation-ready plan.</strong> The contract was enriched into an execution plan with seven units (U1–U7): frozen contracts, role-aware dispatch and replay, evidence package, verifier envelope, the verifier lifecycle, flags and operator grades, and recovery/documentation.
+  </li>
+  <li>
+    <div class="when">2026-08-11</div>
+    <strong>Implementation.</strong> All seven units were implemented and verified — 63 files changed, 419 tests passing, type-check clean. A simplification pass applied 12 findings without regressing behavior.
+  </li>
+  <li>
+    <div class="when">2026-08-11/12</div>
+    <strong>Independent review.</strong> A cross-family audit found 4 actionable issues (2 high-severity), all fixed and verified. A second review loop with an AI code reviewer (Copilot) ran four rounds: it found 7 real findings across the rounds — including two subtle regressions where a missing worktree path could have written files in the wrong directory — and every one was fixed, verified, and re-reviewed on the new code.
+  </li>
+  <li>
+    <div class="when">2026-08-12</div>
+    <strong>Merge-ready.</strong> The pull request (PR #9) is green on CI, merge-clean, with a formal merge-readiness verdict from an independent judge: <strong>ready to merge</strong>.
+  </li>
+</ul>
+
+<h2>Honest caveats</h2>
+
+<div class="caveat">
+<p><strong>What is not yet done:</strong></p>
+<ul>
+  <li><strong>Tester dispatch.</strong> A separate "tester" role is specified but not yet built. The verifier currently grades an evidence package that includes no tester outputs; grading proceeds correctly without them, and tester dispatch is future work.</li>
+  <li><strong>Two end-to-end tests run only in CI.</strong> Two integration tests require a live agent daemon and cannot complete in this local environment; they are committed and will be exercised by the CI pipeline.</li>
+  <li><strong>Two small follow-ups</strong> were filed as issues (an unused import to clean up; a defensive hardening on an older code path) — neither blocks this change.</li>
+</ul>
+</div>
+
+<h2>The bottom line for a manager</h2>
+
+<p>This change makes Miah's quality bar <em>independently enforced</em>: the checks are agreed before work starts, the grading is done by a separate specialist with evidence to show for every call, and anything that needs human judgment is escalated to a human instead of being decided by the machine. The work went through implementation, simplification, two independent review passes, and a formal merge-readiness verdict — 7 review findings found and fixed, none remaining — and is ready to merge.</p>
+
+<footer>Composed 2026-08-12 by ce-explain</footer>
+
+</main>
+</body>
+</html>
