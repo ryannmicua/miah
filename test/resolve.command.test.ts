@@ -53,6 +53,34 @@ const PLAN = [
   "",
 ].join("\n");
 
+/** Two deterministic criteria with IDENTICAL text (the KTD1 mis-target hazard). */
+const PLAN_TWIN_TEXT = [
+  "---",
+  "title: Twin Text Plan",
+  "artifact_contract: ce-unified-plan/v1",
+  "execution: code",
+  "---",
+  "",
+  "# Twin Text Plan",
+  "",
+  "## Implementation Units",
+  "",
+  "### U1. Source module",
+  "",
+  "- **Goal:** Create the `src/hello.ts` source module.",
+  "- **creates:** `src/hello.ts`",
+  "- **inputs:** none",
+  "- **depends-on:** none",
+  "- **Acceptance:**",
+  "  - U1.AC1. same wording — `tier: deterministic`",
+  "  - U1.AC2. same wording — `tier: deterministic`",
+  "- **Verification Contract:**",
+  "  - **Commands:** `U1.CMD1` = `npm test`",
+  "  - **Criterion mapping:** `U1.AC1` -> `U1.CMD1`; `U1.AC2` -> `U1.CMD1`",
+  "  - **Evidence sources:** `verification`",
+  "",
+].join("\n");
+
 afterEach(() => {
   vi.restoreAllMocks();
   cleanupTempDirs();
@@ -65,11 +93,11 @@ interface AdmittedRun {
   config: ReturnType<typeof fastConfig>;
 }
 
-async function admit(): Promise<AdmittedRun> {
+async function admit(planText: string = PLAN): Promise<AdmittedRun> {
   const basePath = makeTempDir("miah-resolve-");
   const config = fastConfig();
   const holderId = "admit-holder";
-  const admission = await admitPlan(PLAN, {
+  const admission = await admitPlan(planText, {
     probe: makeFakeProbe(),
     config,
     basePath,
@@ -306,6 +334,60 @@ describe("resolve command", () => {
       events.some((e) => e.type === "acceptance_decision" && e.unit_id === "U1" && e.decision === "accept"),
     ).toBe(true);
     expect(store.replay().state.units.U1.status).toBe("accepted");
+    expect(unresolvedEscalations(store)).toHaveLength(0);
+  });
+
+  it("KTD7: operator resolution by criterion_id targets the escalated twin-text criterion, not its namesake", async () => {
+    const run = await admit(PLAN_TWIN_TEXT);
+    const store = new RunStore({
+      basePath: run.basePath,
+      runId: run.runId,
+      config: run.config,
+      holderId: run.holderId,
+    });
+    // AC1 passed verification; AC2 is ungraded/escalate — the predicate
+    // escalates AC2, whose text is IDENTICAL to AC1's. The escalation payload
+    // carries AC2's stable id (the applyAcceptance KTD7 shape).
+    store.append("criterion_grades_recorded", {
+      unit_id: "U1",
+      grades: [
+        { criterion_id: "U1.AC1", criterion: "same wording", tier: "deterministic", grade: "pass", route: null, basis: "verifier-certified:all-passed", source: "verifier" },
+        { criterion_id: "U1.AC2", criterion: "same wording", tier: "deterministic", grade: "ungraded", route: "escalate", basis: "verifier-ungraded: mechanical evidence insufficient", source: "verifier" },
+      ],
+    });
+    const raised = raiseEscalation(store, {
+      unit_id: "U1",
+      trigger: "no-checker-profile-clears-calibration-bar",
+      reason: "verdict is ungraded (calibration bar not cleared / operator judgment required, R48)",
+      criterion: "same wording",
+      payload: { criterion_id: "U1.AC2", declared_tier: "deterministic" },
+    });
+    ensurePhase(store, "Attention");
+    store.lease.release(run.holderId);
+
+    const { code } = await captureRunResolve(
+      run.runId,
+      raised.escalation_id,
+      "approve",
+      "operator graded AC2",
+      run.basePath,
+      run.config,
+    );
+    expect(code).toBe(0);
+
+    const state = store.replay().state;
+    // The operator grade landed on U1.AC2 — the escalated criterion — NOT on
+    // U1.AC1, even though both criteria share identical display text.
+    const grades = state.criterion_grades.U1;
+    expect(grades.some((g) => g.criterion_id === "U1.AC2" && g.source === "operator" && g.grade === "pass")).toBe(true);
+    expect(grades.some((g) => g.criterion_id === "U1.AC1" && g.source === "operator")).toBe(false);
+    // AC1's verifier pass survived the merge untouched.
+    expect(grades.some((g) => g.criterion_id === "U1.AC1" && g.source === "verifier" && g.grade === "pass")).toBe(true);
+    // Both criteria now pass: the unit accepts.
+    expect(state.units.U1.status).toBe("accepted");
+    expect(
+      store.journal.readEvents().some((e) => e.type === "acceptance_decision" && e.unit_id === "U1" && e.decision === "accept"),
+    ).toBe(true);
     expect(unresolvedEscalations(store)).toHaveLength(0);
   });
 

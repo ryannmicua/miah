@@ -19,6 +19,7 @@ import {
   defaultVerifierEnvelope,
   driveSteps,
   failRunner,
+  inspectResult,
   makeUnit,
   seedBuilderWorktree,
   setupHarness,
@@ -645,6 +646,46 @@ describe("verifier lifecycle (U5)", () => {
       .pop();
     expect(raised?.trigger).toBe("repeatedly-fails");
     expect(String(raised?.reason)).toContain("verifier attempts exceeded");
+  });
+
+  it("U5.AC5: a verifier whose worktree cwd is unavailable fails closed without recording a CWD-derived continuity hash", async () => {
+    const h = setupHarness(
+      { U1: unitWith([{ id: "U1.AC1", text: "behaves per contract", tier: "deterministic" }]) },
+      {
+        config: fastConfig({ run: { max_takes: 3, max_rework_cycles: 2 } }),
+        seed: (w) => seedBuilderWorktree(w, "U1", 1, ["src/hello.ts"]),
+      },
+    );
+    // The builder launches with a known worktree; the verifier launch reports
+    // no cwd (recoverable agent identity, unknown worktree) — the null-cwd
+    // verifier termination path (KTD5 hardening).
+    h.adapter.onLaunch = (prompt) => {
+      h.adapter.launchResult = prompt.includes("Verification task (verifier)")
+        ? { agentId: "agent-v", cwd: null, workspaceId: "wks-v" }
+        : { agentId: "agent-b", cwd: h.worktree, workspaceId: "wks-b" };
+    };
+    h.adapter.statusFor = () => "idle";
+    h.adapter.inspectFor = (handle) =>
+      inspectResult(handle.agentId, "idle", handle.agentId === "agent-v" ? null : h.worktree);
+    await driveSteps(h);
+
+    const state = h.t.store.replay().state;
+    expect(state.phase).toBe("Attention");
+    expect(state.units.U1.verifier_attempts).toBe(3);
+    expect(state.units.U1.takes).toBe(1); // no builder takes were spent
+    expect(state.awaiting_verification.U1).toBeDefined(); // frozen candidate preserved
+    const raised = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "escalation_raised")
+      .pop();
+    expect(raised?.trigger).toBe("repeatedly-fails");
+    expect(String(raised?.reason)).toContain("verifier attempts exceeded");
+    // The null-cwd verifier never produced a continuity record: the process
+    // CWD was never hashed as a stand-in for the verifier's worktree.
+    const verifierContinuity = h.t.store.journal
+      .readEvents()
+      .filter((e) => e.type === "custody_continuity_record" && e.role === "verifier");
+    expect(verifierContinuity).toHaveLength(0);
   });
 
   it("U5.AC5: the verifier-envelope seam is inert in production — a synthetic envelope never reaches disk", async () => {

@@ -231,7 +231,7 @@ export function renderPacketPrompt(packet: DispatchPacket, packetHash: string): 
       ...context.contract_commands.map((command) => `  - ${command.id}: \`${command.command}\``),
       "",
       `- Criterion -> command mapping: ${context.contract_summary}`,
-      "- Every grade entry: one per criterion, verdict from pass|fail|ungraded, non-empty basis, evidence pointers that resolve to package artifacts whose SHA-256 appears in the custody slice.",
+      "- Every grade entry: one per non-human criterion, verdict from pass|fail|ungraded, non-empty basis, evidence pointers that resolve to package artifacts whose SHA-256 appears in the custody slice.",
       "- Deterministic criteria: certify from the harvested mechanical evidence (commands all-passed, evidence genuine and complete).",
       "- Judgment criteria: judge from the evidence; your grade carries authority only through the calibration gate Miah applies.",
       "- If a criterion needs human judgment, set flagged_for_human: true instead of forcing a verdict.",

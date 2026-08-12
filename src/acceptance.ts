@@ -42,6 +42,8 @@ export const INTEGRATION_GAP_REASON = "integration-smuggle: undeclared dependenc
 
 /** Per-criterion result of the acceptance predicate (R51). */
 export interface CriterionResult {
+  /** The stable criterion id (KTD1), authoritative join key when present. */
+  criterion_id: string | null;
   criterion: string;
   declaredTier: string | null;
   pass: boolean;
@@ -109,6 +111,7 @@ export function evaluateAcceptance(input: AcceptanceInput): AcceptanceVerdict {
     );
     if (gap !== undefined) {
       return {
+        criterion_id: criterion.id ?? null,
         criterion: criterion.text,
         declaredTier: criterion.tier,
         pass: false,
@@ -128,7 +131,7 @@ export function evaluateAcceptance(input: AcceptanceInput): AcceptanceVerdict {
       return tierMeetsOrExceeds(record.tier, criterion.tier);
     });
     if (qualifying.length > 0) {
-      return { criterion: criterion.text, declaredTier: criterion.tier, pass: true, reason: null, route: null };
+      return { criterion_id: criterion.id ?? null, criterion: criterion.text, declaredTier: criterion.tier, pass: true, reason: null, route: null };
     }
     const forCriterion = records.filter((record) => recordMatchesCriterion(record, criterion));
     // R16/KTD6: a declared human criterion with no operator grade is awaiting
@@ -140,6 +143,7 @@ export function evaluateAcceptance(input: AcceptanceInput): AcceptanceVerdict {
         (record) => record.grade === "ungraded" && record.route === "escalate",
       );
     return {
+      criterion_id: criterion.id ?? null,
       criterion: criterion.text,
       declaredTier: criterion.tier,
       pass: false,
@@ -218,6 +222,10 @@ export function applyAcceptance(
     escalationEvent = store.append("escalation_raised", {
       unit_id: verdict.unit_id,
       criterion: firstEscalated?.criterion ?? null,
+      // KTD1: the stable criterion id is the authoritative join key (two
+      // criteria in one unit may share identical text); consumers resolve by
+      // id when present and fall back to text only for historical events.
+      criterion_id: firstEscalated?.criterion_id ?? null,
       reason: verdict.reason ?? "criterion requires operator judgment",
       trigger,
       ...payload,

@@ -69,7 +69,7 @@ describe("acceptance", () => {
     expect(verdict.route).toBeNull();
     expect(verdict.reason).toBeNull();
     expect(verdict.criteria).toEqual([
-      { criterion: "criterion-a", declaredTier: "deterministic", pass: true, reason: null, route: null },
+      { criterion_id: null, criterion: "criterion-a", declaredTier: "deterministic", pass: true, reason: null, route: null },
     ]);
   });
 
@@ -253,6 +253,35 @@ describe("acceptance", () => {
     expect(applied.escalationEvent).toMatchObject({
       type: "escalation_raised",
       unit_id: "U1",
+      trigger: "no-checker-profile-clears-calibration-bar",
+    });
+  });
+
+  it("KTD7: an escalation on one of two identical-text criteria carries that criterion's id in the payload", () => {
+    const t = setupStore();
+    const verdict = evaluateAcceptance({
+      unit: unit([
+        { id: "U1.AC1", text: "same wording", tier: "calibrated-judge" },
+        { id: "U1.AC2", text: "same wording", tier: "calibrated-judge" },
+      ]),
+      // AC1 passed; AC2 is ungraded/escalate — the predicate escalates AC2,
+      // whose display text is identical to AC1's. Text alone cannot tell them
+      // apart; the escalation must carry AC2's stable id (KTD1).
+      records: [
+        { criterion_id: "U1.AC1", criterion: "same wording", tier: "calibrated-judge", grade: "pass", route: null, basis: "verifier-certified:all-passed" },
+        { criterion_id: "U1.AC2", criterion: "same wording", tier: "calibrated-judge", grade: "ungraded", route: "escalate", basis: "verifier-not-calibrated" },
+      ],
+      openGaps: [],
+    });
+    expect(verdict.route).toBe("escalate");
+    const escalated = verdict.criteria.find((result) => result.route === "escalate");
+    expect(escalated?.criterion).toBe("same wording");
+    expect(escalated?.criterion_id).toBe("U1.AC2");
+    const applied = applyAcceptance(t.store, verdict);
+    expect(applied.escalationEvent).toMatchObject({
+      type: "escalation_raised",
+      criterion: "same wording",
+      criterion_id: "U1.AC2",
       trigger: "no-checker-profile-clears-calibration-bar",
     });
   });

@@ -1034,7 +1034,22 @@ async function processVerifierTermination(
     return proc;
   }
 
-  const worktreeRoot = handle.cwd ?? "";
+  // KTD5 hardening: the terminated verifier's worktree root is authoritative
+  // only when the adapter observed it. A null cwd must never degrade into
+  // `path.join("", ...)` reads against the process CWD or a workspaceHash of
+  // the wrong directory — fail the attempt cleanly instead (bounded retry).
+  const worktreeRoot = handle.cwd === null ? null : handle.cwd;
+  if (worktreeRoot === null) {
+    store.append("verifier_attempt_failed", {
+      unit_id: intent.unit_id,
+      attempt: intent.idempotency_key,
+      reason: "verifier worktree unavailable: adapter reported no cwd for the terminated verifier",
+    });
+    if (verifierBudgetExhausted(store.stateSnapshot(), intent.unit_id, ctx.config)) {
+      proc.escalated.push(escalateVerifierRepeatedlyFails(ctx, intent.unit_id));
+    }
+    return proc;
+  }
   const packageDir = path.join(worktreeRoot, ".miah", "verifier", unit.id, candidate.attempt);
   const manifest = readPackageManifest(packageDir);
   const binding = verifyEnvelopeBinding(envelope, packageDir, candidate, manifest);

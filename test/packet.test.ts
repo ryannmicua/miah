@@ -210,6 +210,40 @@ describe("dispatch packet", () => {
     expect(prompt).toContain("you never run them");
   });
 
+  it("U4.AC2: the verifier prompt's grade contract excludes human-tier criteria unambiguously (KTD7 wording)", () => {
+    const packet = composePacket({
+      unit: UNIT_U1,
+      role: "verifier",
+      take: 1,
+      planExcerpt: PLAN_TEXT,
+      envelopePath: ".miah/envelope-verifier-U1-t1.json",
+      idempotencyKey: "dispatch-verifier-U1-t1-a1",
+      deadline: "2026-08-07T00:00:00.000Z",
+      provider: "opencode",
+      model: "opencode-go/glm-5.2",
+      verifier: {
+        package_path: ".miah/verifier/U1/dispatch-builder-U1-t1",
+        package_sha256: "a".repeat(64),
+        candidate_attempt: "dispatch-builder-U1-t1",
+        candidate_take: 1,
+        workspace_id: "wks-1",
+        criteria: [
+          { id: "U1.AC1", text: "mechanical", tier: "deterministic" },
+          { id: "U1.AC2", text: "operator decides", tier: "human" },
+        ],
+        contract_commands: [{ id: "U1.CMD1", command: "npm test" }],
+        contract_summary: "U1.AC1 -> U1.CMD1",
+      },
+    });
+    const prompt = renderPacketPrompt(packet, computePacketHash(packet));
+    // The grade contract is scoped to non-human criteria so the human-tier
+    // omission instruction cannot be misread as "grade it anyway" (the
+    // envelope-validation rejection/retry loop failure mode).
+    expect(prompt).toContain("Every grade entry: one per non-human criterion");
+    expect(prompt).not.toContain("Every grade entry: one per criterion");
+    expect(prompt).toContain("Human-tier criteria are graded by the operator: omit them from your envelope.");
+  });
+
   it("packet hash is a deterministic SHA-256 of the canonical packet (R36)", () => {
     const a = makePacket();
     const b = makePacket();
