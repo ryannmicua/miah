@@ -13,7 +13,7 @@ This document distills the settled design decisions of Miah v1: what was decided
 
 ## 1. Runtime shape: a stateless interpreter over a durable run directory
 
-**Decision.** Miah is a standalone CLI that behaves as a stateless interpreter over a durable run directory — immutable plan snapshot + append-only journal + single-writer lease — rather than a daemon, an agent, or a library. The supervisor loop lives on disk, not in a process; resume is the only implementation.
+**Decision.** Miah is a standalone CLI that behaves as a stateless interpreter over a durable run directory — immutable plan snapshot + append-only journal + single-writer lease — rather than an agent or a library. The supervisor loop lives on disk, not in a process; resume is the only implementation. *(Revised 2026-08-18: a separate, non-supervisory watchdog daemon was added for deadline enforcement when no driver is running — see [D1 revision](../decisions/2026-08-18-d1-revision-add-watchdog-daemon.md). The supervisor loop itself is still not hosted in a process.)*
 
 **Rationale.** A session-bound agent loses its state when the session dies; a resident daemon loses its state when memory is lost; both still need a journal to be correct. Making the run the durable entity and the loop a re-derivable function removes the hosting question. (ADR:D1, adopted from prior art.) Liveness and resumability are separated: a run nobody is driving is paused, not lost (ADR:D1-c, `PLAN:VISION` run step). The direct consequence is that any process may pick the run up — a terminal, a cron job, a Paseo schedule, or another agent (ADR:D1-b).
 
@@ -263,7 +263,7 @@ This document distills the settled design decisions of Miah v1: what was decided
 
 ## 26. Technology and delivery
 
-**Decision.** TypeScript/Node.js, npm package with a `miah` bin entry, commander for CLI parsing, `yaml` for frontmatter, vitest for tests (PLAN:D8-a/D8-b, PLAN:R83). No background service or daemon; Windows 10 + Git Bash portability with no POSIX-only primitives (PLAN:R84). Build is `tsc`; the package ships `dist/`.
+**Decision.** TypeScript/Node.js, npm package with a `miah` bin entry, commander for CLI parsing, `yaml` for frontmatter, vitest for tests (PLAN:D8-a/D8-b, PLAN:R83). Windows 10 + Git Bash portability with no POSIX-only primitives (PLAN:R84). Build is `tsc`; the package ships `dist/`. *(Revised 2026-08-18: the installer now also registers a small OS-native watchdog service for deadline enforcement — see [D1 revision](../decisions/2026-08-18-d1-revision-add-watchdog-daemon.md). The `miah` CLI/driver itself remains a plain program, not a background service.)*
 
 **Rationale.** Matches the operator's npm/Node ecosystem; JSON is native (journal is JSONL); Windows portability is mandated by the environment (PLAN:KTD2). Go/Rust/Python were considered and rejected (PLAN:D8-a alternatives).
 

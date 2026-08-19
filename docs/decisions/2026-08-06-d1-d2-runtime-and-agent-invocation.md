@@ -3,9 +3,12 @@ title: D1/D2 — Runtime form factor and specialist agent invocation
 date: 2026-08-06
 session: Brainstorm 1
 scope: docs/planning-brief.md D1, D2 only
-status: decided; OP-1 settled by the operator 2026-08-06, OP-2 awaiting confirmation
+status: decided; OP-1 settled by the operator 2026-08-06, OP-2 awaiting confirmation. The "not a
+  daemon" clause and the "Long-running Miah daemon" rejected alternative below are superseded —
+  see docs/decisions/2026-08-18-d1-revision-add-watchdog-daemon.md.
 supersedes: nothing
-superseded_by: the Phase 2 unified plan in docs/plans/ once written
+superseded_by: the Phase 2 unified plan in docs/plans/ once written; and, for the "not a daemon"
+  clause specifically, docs/decisions/2026-08-18-d1-revision-add-watchdog-daemon.md (2026-08-18)
 ---
 
 # D1/D2 — Runtime form factor and specialist agent invocation
@@ -30,7 +33,11 @@ superseded_by: the Phase 2 unified plan in docs/plans/ once written
 ### Decision
 
 **Miah is a standalone command-line program that behaves as a stateless interpreter over a durable
-run directory.** It is not an agent, not a skill, not a daemon, and not a library.
+run directory.** It is not an agent, not a skill, and not a library. *(The "not a daemon" clause
+that originally appeared here is superseded — see
+docs/decisions/2026-08-18-d1-revision-add-watchdog-daemon.md, 2026-08-18. The supervisor itself
+remains a stateless interpreter with no resident supervisor process; a separate watchdog daemon was
+added for deadline enforcement only.)*
 
 The supervisor loop does not live in a process. It lives on disk, as **immutable plan snapshot +
 append-only journal + single-writer lease**. Any process may pick it up.
@@ -102,7 +109,7 @@ Two consequences follow that a session-hosted design cannot offer:
 | Alternative | Why rejected |
 | --- | --- |
 | **Miah as a harness agent or skill** (LLM control loop driving Paseo) | The decisive objection is not non-determinism, it is **auditability of omission**. A journaled LLM loop records what it did; it cannot record what it failed to do. A skipped gate leaves no entry, and `VISION.md` requires that "problems cannot disappear silently." Program control flow makes a gate unskippable; a prompt cannot. Secondary: loop state lives in a context window, and it puts Miah in the judging seat D1-e forbids. **Retained fragment:** an agent may *invoke* the CLI, and probably will. |
-| **Long-running Miah daemon** | A second supervisory daemon beside Paseo's. A process is still mortal, so the journal is required anyway — the daemon buys liveness, not durability, at the cost of install, autostart, and lifecycle burden. At one-active-plan scale it is idle most of the time, and it drifts toward the "general-purpose multi-project orchestration platform" `VISION.md` excludes. If unattended liveness later proves necessary, a thin scheduled cranker is a much smaller addition than a stateful daemon. |
+| **Long-running Miah daemon** | *(Rejection superseded 2026-08-18 for the narrow case of deadline enforcement — see docs/decisions/2026-08-18-d1-revision-add-watchdog-daemon.md. The reasoning below is kept as the historical record.)* A second supervisory daemon beside Paseo's. A process is still mortal, so the journal is required anyway — the daemon buys liveness, not durability, at the cost of install, autostart, and lifecycle burden. At one-active-plan scale it is idle most of the time, and it drifts toward the "general-purpose multi-project orchestration platform" `VISION.md` excludes. If unattended liveness later proves necessary, a thin scheduled cranker is a much smaller addition than a stateful daemon. |
 | **Library only** | No operator surface, no lease owner, no run identity. It is a component of the CLI, not a rival to it. |
 | **Ride Paseo entirely** (Miah as a set of Paseo skills plus schedules) | Paseo's state is mutable and Paseo-owned; there is no append-only journal. `docs/research/paseo-capabilities.md` records that restarting the daemon kills all running agents, so run durability would inherit a beta daemon's restart semantics. |
 | **Adopt a durable-execution engine** (Temporal, LangGraph, DBOS) as the spine | The boring option, and genuinely tempting. Rejected for v1 because `VISION.md` mandates durable state that is *filesystem-based* and auditable by the operator; a server-backed or framework-owned checkpointer makes the audit artifact opaque and adds a runtime dependency to a single-operator tool. **Their mechanics are adopted wholesale** — write-ahead logging, idempotency keys, leases, reconcile-on-resume, continue-as-new — just not their runtimes. |
