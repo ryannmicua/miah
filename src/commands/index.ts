@@ -9,10 +9,12 @@ import { runApprove } from "./approve";
 import { runReject } from "./reject";
 import { runAmend } from "./amend";
 import { runList } from "./list";
+import { watchdogInstall, watchdogUninstall, watchdogStatus, type WatchdogMode } from "./watchdog";
 
 /**
  * The exact command surface (R63, KTD15): preflight, start, run, status, stop,
- * resolve, approve, reject, amend, list. Single source of truth for the names.
+ * resolve, approve, reject, amend, list, watchdog (install|uninstall|status).
+ * Single source of truth for the names.
  */
 export const COMMANDS = [
   "preflight",
@@ -25,6 +27,7 @@ export const COMMANDS = [
   "reject",
   "amend",
   "list",
+  "watchdog",
 ] as const;
 
 /**
@@ -160,5 +163,43 @@ export function registerCommands(program: Command): void {
     .description("List all runs in ~/.miah/runs/")
     .action(() => {
       runGuarded(() => runList(), "miah list");
+    });
+
+  const watchdog = program
+    .command("watchdog")
+    .description("Watchdog daemon management (install, uninstall, status)");
+
+  watchdog
+    .command("install")
+    .description("Register the watchdog (default: timer/oneshot; --mode service for resident loop)")
+    .option("--base-path <path>", "base path for the watchdog (defaults to config)")
+    .option("--cadence <seconds>", "heartbeat cadence in seconds (defaults to lease TTL)")
+    .option("--mode <mode>", "timer (oneshot tick, default) or service (resident loop)", "timer")
+    .action((opts: { basePath?: string; cadence?: string; mode?: string }) => {
+      const mode: WatchdogMode = opts.mode === "service" ? "service" : "timer";
+      runGuarded(
+        () =>
+          watchdogInstall({
+            basePath: opts.basePath,
+            cadenceS: opts.cadence ? Number(opts.cadence) : undefined,
+            mode,
+          }),
+        "miah watchdog install",
+      );
+    });
+
+  watchdog
+    .command("uninstall")
+    .description("Remove the watchdog service registration")
+    .action(() => {
+      runGuarded(() => watchdogUninstall(), "miah watchdog uninstall");
+    });
+
+  watchdog
+    .command("status")
+    .description("Show watchdog registration and heartbeat status")
+    .option("--base-path <path>", "base path for the watchdog (defaults to config)")
+    .action((opts: { basePath?: string }) => {
+      runGuarded(() => watchdogStatus({ basePath: opts.basePath }), "miah watchdog status");
     });
 }

@@ -1,22 +1,20 @@
 /**
- * Admission gate (R57, R80, U4): `preflight(plan, workspace) ∧ substrateProbe()`.
+ * Admission gate (R57, R80, U4): `preflight(plan, workspace) \u2227 substrateProbe()`.
  *
  * `admitPlan` composes the pure preflight verdict (R55-R60) with the live
  * substrate probe and fails closed on any blocker:
  *
  *   - preflight failure        -> structured failures, no run store
- *   - max-duration absent      -> refused, message names the missing mechanism
- *                                 (R4/R5, R57, R86)
+ *   - max-duration absent      -> refused, unless watchdog is healthy (R21)
  *   - MCP injection unscopable -> refused, message names the issue + operator
  *                                 workaround (R21, R87)
  *   - immutability absent      -> recorded as a manifest caveat, NOT a refusal
  *                                 (R46)
  *
- * When everything passes, admission writes the run store: the plan snapshot
- * (R23), `units.json` (R24), the manifest with the admission-time config
- * snapshot (R80) and probe verdicts, then acquires the lease and opens the
- * journal with a `run_start` event and an Admitting phase transition (R35,
- * KTD14).
+ * The max-duration gate is satisfied by EITHER a native Paseo per-agent bound
+ * OR a healthy watchdog heartbeat (R21, KTD10). With neither, admission fails
+ * closed exactly as before. The refusing message names the watchdog install
+ * command as the actionable path (R22).
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -27,6 +25,7 @@ import { runIdFromPlan, resolveRunLayout, RunStore, type RunStoreLayout } from "
 import { writeManifest, type Manifest } from "./manifest";
 import { canonicalizePlan, computeContentHash, writeSnapshot } from "./snapshot";
 import type { SubstrateProbe, SubstrateProbeReport } from "./substrate-probe";
+import { heartbeatFreshness } from "./watchdog/heartbeat";
 
 export type AdmissionFailureKind = "preflight-failed" | "max-duration-absent" | "mcp-unscopable";
 
@@ -71,9 +70,14 @@ export interface AdmitOptions {
 export function maxDurationAbsentMessage(probe: SubstrateProbeReport): string {
   const evidence = probe.max_duration.evidence.join("; ") || "no evidence recorded";
   return [
-    "substrate probe: per-agent max-duration is ABSENT — admission fails closed (R4/R5, R57, R86).",
-    "Mechanism needed: a Paseo daemon-enforced per-agent duration/expiry flag",
-    "(e.g. --max-duration, --expires-at, or --budget) on `paseo run` so Miah can bound specialist runtime.",
+    "substrate probe: per-agent max-duration is ABSENT and no healthy watchdog heartbeat found.",
+    "admission fails closed (R4/R5, R57, R86, R21).",
+    "",
+    "To satisfy the max-duration gate, either:",
+    "  1. Install the watchdog: miah watchdog install",
+    "  2. Wait for its first tick to write a heartbeat, then retry.",
+    "OR ensure the Paseo daemon ships a native per-agent duration/expiry flag.",
+    "",
     `Evidence: ${evidence}.`,
   ].join(" ");
 }
@@ -121,7 +125,24 @@ export async function admitPlan(planText: string, opts: AdmitOptions): Promise<A
   }
 
   const probe = await opts.probe.run();
-  if (probe.max_duration.status !== "present") {
+
+  // R21/KTD10: max-duration gate is satisfied by EITHER native Paseo bound
+  // OR a healthy watchdog heartbeat. With neither, fail closed.
+  let maxDurationSatisfied = false;
+  let maxDurationSource = "none";
+  if (probe.max_duration.status === "present") {
+    maxDurationSatisfied = true;
+    maxDurationSource = "paseo";
+  } else {
+    // Check watchdog heartbeat freshness (R20): healthy when age <= 2x cadence.
+    const watchdogCheck = heartbeatFreshness(opts.basePath);
+    if (watchdogCheck.healthy) {
+      maxDurationSatisfied = true;
+      maxDurationSource = "watchdog";
+    }
+  }
+
+  if (!maxDurationSatisfied) {
     failures.push({ kind: "max-duration-absent", message: maxDurationAbsentMessage(probe) });
   }
   if (probe.mcp_injection.status === "unscopable") {
@@ -133,7 +154,7 @@ export async function admitPlan(planText: string, opts: AdmitOptions): Promise<A
     return { ok: false, failures, caveats, preflight, probe, run: null };
   }
 
-  return admitRunStore(planText, { ...opts, probe, preflight, caveats });
+  return admitRunStore(planText, { ...opts, probe, preflight, caveats, maxDurationSource });
 }
 
 function admitRunStore(
@@ -142,8 +163,10 @@ function admitRunStore(
     probe: SubstrateProbeReport;
     preflight: PreflightVerdict;
     caveats: string[];
+    maxDurationSource: string;
   },
 ): AdmissionResult {
+  const maxDurationSource = opts.maxDurationSource;
   const nowMs = opts.now ? opts.now() : Date.now();
   const plan = parsePlan(planText);
 
@@ -177,6 +200,7 @@ function admitRunStore(
     probe_verdicts: {
       paseo_version: opts.probe.paseo_version,
       max_duration: opts.probe.max_duration,
+      max_duration_satisfied_by: maxDurationSource,
       mcp_injection: opts.probe.mcp_injection,
       immutability: opts.probe.immutability,
       caveats: opts.caveats,

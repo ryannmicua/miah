@@ -5,7 +5,8 @@
   "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
-    "miah": "dist/index.js"
+    "miah": "dist/index.js",
+    "miah-watchdog": "dist/watchdog-main.js"
   },
   "files": [
     "dist"

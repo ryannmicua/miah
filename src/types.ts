@@ -54,6 +54,14 @@ export interface RunConfig {
    * cost exceeds the ceiling.
    */
   cost_ceiling_usd?: number;
+  /**
+   * Run-level wall-clock bound on driven time (R10-R14, KD2). Default 28800s
+   * (8 hours of driven time). Operator-overridable in the config file.
+   * Enforced by the driver as an escalation to Attention, not as termination.
+   * Driven time counts only active supervision (lease held), resets on resume,
+   * and wall-clock gaps with no lease held are excluded.
+   */
+  max_duration_s: number;
 }
 
 /** Calibration bar for the calibrated-judge tier (R74, KTD10). */
@@ -223,6 +231,7 @@ export const DEFAULT_CONFIG: Config = {
     concurrency_cap: 1,
     max_takes: 3,
     max_rework_cycles: 2,
+    max_duration_s: 8 * 60 * 60,
   },
   calibration: {
     min_corpus: 15,

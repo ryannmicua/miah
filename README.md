@@ -8,7 +8,7 @@ Miah v1 is shipped: implemented per plan R1–R90 and merged via PR #1 (squash c
 
 ## Getting started
 
-Install and build with `npm ci && npm run build`, then use the `miah` CLI: `preflight | start | run | status | stop | resolve | approve | reject | amend | list`. Live-daemon E2E tests require the Paseo daemon; on hosts without it they are gated on `paseoCliAvailable()` and skip rather than fail. Run an agent from this directory and follow `AGENTS.md`.
+Install and build with `npm ci && npm run build`, then use the `miah` CLI: `preflight | start | run | status | stop | resolve | approve | reject | amend | list`. The watchdog daemon (`miah watchdog install`) ensures overdue specialists are always reaped, even across driver crashes. Live-daemon E2E tests require the Paseo daemon; on hosts without it they are gated on `paseoCliAvailable()` and skip rather than fail. Run an agent from this directory and follow `AGENTS.md`.
 
 **Operator or agent driving Miah? Start at [`OPERATOR.md`](./OPERATOR.md)** — prerequisites, plan format, the command sequence, and what Miah asks you to decide.
 
