@@ -44,6 +44,13 @@ export const FIXTURES_DIR = path.join(__dirname, "..", "..", "fixtures");
 export const TEST_PLAN = path.join(FIXTURES_DIR, "test-plan.md");
 export const TEST_PLAN_BAD = path.join(FIXTURES_DIR, "test-plan-bad.md");
 
+/**
+ * Stable scratch repo for E2E fixture repos. A FIXED path (not a random
+ * mkdtemp) so the Paseo daemon derives at most one project record for it
+ * across runs, instead of one orphan project per full-suite run.
+ */
+const E2E_SCRATCH_DIR = path.join(os.tmpdir(), "miah-e2e-scratch");
+
 /** Deep-partial overrides so tests can tweak one nested threshold at a time. */
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
@@ -199,6 +206,60 @@ function identityPaths(value: string): string[] {
   return [...new Set(variants)];
 }
 
+/**
+ * Forcefully purge any Paseo project and workspace records whose rootPath
+ * contains the given string. Unlike `removeProjectRecord`, this bypasses the
+ * workspace-reference guard so stale e2e scratch projects are always removed.
+ */
+function forceRemoveProjectByPath(pathFragment: string): void {
+  const projectsRegistry = path.join(os.homedir(), ".paseo", "projects", "projects.json");
+  const workspacesRegistry = path.join(os.homedir(), ".paseo", "projects", "workspaces.json");
+  const fragment = pathFragment.toLowerCase().replace(/[\\/]+/g, "\\");
+  const matchesFragment = (p: string) => p.toLowerCase().replace(/[\\/]+/g, "\\").includes(fragment);
+  try {
+    if (fs.existsSync(workspacesRegistry)) {
+      const workspaces = JSON.parse(fs.readFileSync(workspacesRegistry, "utf8")) as Array<{
+        workspaceId: string;
+        projectId: string;
+        rootPath?: string;
+        archivedAt: string | null;
+      }>;
+      const stale = workspaces.filter((ws) => matchesFragment(ws.rootPath ?? ""));
+      if (stale.length > 0) {
+        const staleIds = new Set(stale.map((ws) => ws.projectId));
+        const cleaned = workspaces.map((ws) =>
+          staleIds.has(ws.projectId) ? { ...ws, archivedAt: ws.archivedAt ?? new Date().toISOString() } : ws,
+        );
+        fs.writeFileSync(workspacesRegistry, JSON.stringify(cleaned, null, 2) + "\n", "utf8");
+      }
+    }
+  } catch {
+    // best effort
+  }
+  try {
+    if (!fs.existsSync(projectsRegistry)) {
+      return;
+    }
+    const projects = JSON.parse(fs.readFileSync(projectsRegistry, "utf8")) as Array<{
+      projectId: string;
+      rootPath: string;
+      archivedAt: string | null;
+    }>;
+    const stale = projects.filter((p) => matchesFragment(p.rootPath));
+    if (stale.length === 0) {
+      return;
+    }
+    const removed = new Set(stale.map((p) => p.projectId));
+    fs.writeFileSync(
+      projectsRegistry,
+      JSON.stringify(projects.filter((p) => !removed.has(p.projectId)), null, 2) + "\n",
+      "utf8",
+    );
+  } catch {
+    // best effort
+  }
+}
+
 /** Remove the project record the daemon derived for a temp fixture repo. */
 export function removeProjectRecord(repoRoot: string): void {
   const registry = path.join(os.homedir(), ".paseo", "projects", "projects.json");
@@ -290,7 +351,11 @@ export function cleanupFixtureRepo(repoRoot: string): void {
   }
   removeProjectRecord(repoRoot);
   try {
-    fs.rmSync(repoRoot, { recursive: true, force: true });
+    // Clear the directory contents but keep the directory itself so it is
+    // reused across runs (avoids orphan Paseo projects from random paths).
+    for (const entry of fs.readdirSync(repoRoot)) {
+      fs.rmSync(path.join(repoRoot, entry), { recursive: true, force: true });
+    }
   } catch {
     // best effort
   }
@@ -305,14 +370,18 @@ function sleepSync(ms: number): void {
 
 /** Create a throwaway git fixture repo with one seeded commit. */
 export function createFixtureRepo(): { repoRoot: string; cleanup: () => void } {
-  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "miah-e2e-repo-"));
-  git(repoRoot, "init", "-b", "main");
-  git(repoRoot, "config", "user.email", "e2e@local");
-  git(repoRoot, "config", "user.name", "e2e");
-  fs.writeFileSync(path.join(repoRoot, "seed.txt"), "seed\n");
-  git(repoRoot, "add", "-A");
-  git(repoRoot, "commit", "-qm", "seed");
-  return { repoRoot, cleanup: () => cleanupFixtureRepo(repoRoot) };
+  // Ensure the scratch directory exists and is clean so each call starts fresh.
+  fs.mkdirSync(E2E_SCRATCH_DIR, { recursive: true });
+  for (const entry of fs.readdirSync(E2E_SCRATCH_DIR)) {
+    fs.rmSync(path.join(E2E_SCRATCH_DIR, entry), { recursive: true, force: true });
+  }
+  git(E2E_SCRATCH_DIR, "init", "-b", "main");
+  git(E2E_SCRATCH_DIR, "config", "user.email", "e2e@local");
+  git(E2E_SCRATCH_DIR, "config", "user.name", "e2e");
+  fs.writeFileSync(path.join(E2E_SCRATCH_DIR, "seed.txt"), "seed\n");
+  git(E2E_SCRATCH_DIR, "add", "-A");
+  git(E2E_SCRATCH_DIR, "commit", "-qm", "seed");
+  return { repoRoot: E2E_SCRATCH_DIR, cleanup: () => cleanupFixtureRepo(E2E_SCRATCH_DIR) };
 }
 
 // ---------------------------------------------------------------------------

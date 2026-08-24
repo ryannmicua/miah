@@ -35,3 +35,13 @@
 ## Dispatch
 
 **`dispatch.default_workspace`** — An optional field on the dispatch config: an existing Paseo workspace id that dispatches attach to via `--workspace <id>` instead of creating a new worktree. Absent/undefined is the default — the new-worktree contract applies. Read from the run's config snapshot (R80) at dispatch time so a run in progress keeps its workspace policy. See `docs/solutions/patterns/adapter-default-workspace-config-field.md`.
+
+## Watchdog daemon
+
+**Watchdog daemon** — A scheduled process that is the sole reaper of per-dispatch deadlines (U3–U4). On each tick it scans all active runs, terminates any specialist whose in-flight dispatch deadline has passed, writes a reap receipt, and — when the lease is stale (driver crashed) — takes over the lease, drains the receipt into the journal, and releases the lease. The watchdog writes a heartbeat on every tick, including empty ones, so the admission gate can verify deadline enforcement is active. Install with `miah watchdog install`; status with `miah watchdog status`. See `OPERATOR.md` and `docs/plans/2026-08-19-001-feat-miah-watchdog-daemon-plan.md`.
+
+**Reap receipt** — A JSON artifact written by the watchdog when it terminates an overdue specialist (`miah/reap-receipt/v1`). Carries the attempt key, agent identity, deadline, adapter outcome, and reaper identity. The receipt is the bridge between the watchdog (which kills without the lease) and the driver (which journals with the lease): the driver drains receipts at its step boundary, journals `gap_recorded` + `dispatch_terminated`, then deletes the receipt file. See `src/watchdog/receipts.ts`.
+
+**Driven time** — The wall-clock time a run has spent under active supervision (lease held by a live driver). Computed from the journal's `lease_acquired` / `lease_released` event pairs; wall-clock gaps with no lease held are excluded. Compared against `run.max_duration_s` (default 8h) at each step boundary; exceeding it raises a `run-deadline-exceeded` escalation to Attention. Resets on resume. See `src/driver-loop.ts` and `src/run-store.ts`.
+
+**Sole reaper** — The watchdog is the only component that terminates overdue specialists (R2, Revision 2 rationale). The driver does not kill directly — it only drains receipts at step boundaries and journals the result. This separation means the driver can crash without losing deadline enforcement: the next watchdog tick finds the stale lease, terminates the specialist, and leaves a receipt for the resuming driver. See `docs/plans/2026-08-19-001-feat-miah-watchdog-daemon-plan.md` (Revision 2).

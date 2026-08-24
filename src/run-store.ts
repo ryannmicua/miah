@@ -33,6 +33,8 @@ export interface RunStoreLayout {
   snapshotsDir: string;
   evidenceDir: string;
   approvalPackagePath: string;
+  /** Per-run directory for reap receipts (R23). Writers create lazily; readers treat absence as empty. */
+  reapReceiptsDir: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export function resolveRunLayout(basePath: string, runId: string): RunStoreLayou
     snapshotsDir: path.join(root, "snapshots"),
     evidenceDir: path.join(root, "evidence"),
     approvalPackagePath: path.join(root, "approval-package.json"),
+    reapReceiptsDir: path.join(root, "reap-receipts"),
   };
 }
 

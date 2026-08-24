@@ -42,6 +42,7 @@ import {
   type EscalationSummary,
 } from "./escalation";
 import type { RunStore, RunStoreLayout } from "./run-store";
+import { drainReapReceipts } from "./watchdog/receipts";
 import type { Config, PlanUnit } from "./types";
 import type {
   CommandRunner,
@@ -352,6 +353,11 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
   // Reconstruct under lease (R3): repair a crash tail and derive state (R42).
   store.replay();
 
+  // R25/KTD7: drain reap receipts at resume, before reconcileIntents runs.
+  // A reaped intent must already be closed by then so reconcile never tries
+  // to recover a handle for an agent the watchdog already killed.
+  drainReapReceipts(store);
+
   // R65: a stop recorded while no driver was alive is honored here.
   if (readStopRequested(store.layout)) {
     await stopAndRelease(ctx, runtime);
@@ -391,6 +397,11 @@ export async function runDriver(opts: DriverOptions): Promise<DriverResult> {
   let stepsRun = 0;
   for (;;) {
     store.lease.maybeHeartbeat(holderId); // R40 heartbeat at the step boundary
+
+    // R25/KTD7: drain reap receipts at each step boundary, after heartbeat
+    // (so lease is fresh for the appends) and before the stop check (so a
+    // run being stopped still records its reaps).
+    drainReapReceipts(store);
 
     // R65: read stop-requested at each step boundary.
     if (readStopRequested(store.layout)) {

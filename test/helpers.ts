@@ -22,6 +22,7 @@ export function makeClock(initial = 1_000_000): Clock {
 export function fastConfig(overrides: Partial<Config> = {}): Config {
   const journal = overrides.journal ?? {};
   const lease = overrides.lease ?? {};
+  const watchdog = overrides.watchdog ?? {};
   return {
     ...DEFAULT_CONFIG,
     ...overrides,
@@ -29,6 +30,7 @@ export function fastConfig(overrides: Partial<Config> = {}): Config {
     lease: { heartbeat_interval_s: 1, ttl_s: 2, ...lease },
     dispatch: { ...DEFAULT_CONFIG.dispatch, ...(overrides.dispatch ?? {}) },
     run: { ...DEFAULT_CONFIG.run, ...(overrides.run ?? {}) },
+    watchdog: { cadence_s: 2, enabled: true, ...watchdog },
     calibration: { ...DEFAULT_CONFIG.calibration, ...(overrides.calibration ?? {}) },
   };
 }

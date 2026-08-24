@@ -106,6 +106,35 @@ Miah also steers automatically within its authority: deadline refusal terminates
 
 See [`docs/architecture/dispatch-and-isolation.md`](./docs/architecture/dispatch-and-isolation.md) (packet, deadline, reconciliation) and [`docs/architecture/state-machine-reference.md`](./docs/architecture/state-machine-reference.md) (phases, `operator_decision` events).
 
+## The watchdog daemon
+
+Miah includes a **watchdog daemon** — the sole reaper of per-dispatch deadlines. It is a separate scheduled process that runs independently of the driver, ensuring overdue specialists are always terminated even if the driver crashes.
+
+### What it does
+
+- **Scans** all active runs on every tick, looking for in-flight dispatches whose deadlines have passed.
+- **Terminates** overdue specialists through the adapter (the same `adapter.stop` the driver uses).
+- **Writes a reap receipt** so the driver (or a takeover) can journal the deadline gap and `dispatch_terminated` at the next step boundary.
+- **Takes over the lease** when it is stale (driver crashed), drains the receipt, journals the gap, and releases the lease.
+- **Writes a heartbeat** on every tick — even when nothing was reaped — so the admission gate can verify the watchdog is alive.
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `miah watchdog install` | Register the watchdog with the platform scheduler (Windows Task Scheduler on v1). Cadence is derived from the config's `lease.ttl_s`. |
+| `miah watchdog status` | Show registration state, heartbeat age, version, cadence, and health. |
+| `miah watchdog uninstall` | Remove the watchdog from the platform scheduler. |
+
+### Configuration
+
+- **`max_duration_s`** in `~/.miah/config.json` (`run.max_duration_s`): run-level wall-clock bound on driven time. Default 28800s (8 hours). Enforced by the driver as an escalation to Attention.
+- **Cadence**: the watchdog tick interval, derived from `lease.ttl_s` (default 60s). The heartbeat must be no older than 2× cadence to be considered healthy.
+
+### Admission integration
+
+`miah start` checks watchdog health as part of the max-duration admission gate. A missing or stale heartbeat causes admission to fail closed, naming the install command so the operator has an actionable fix. See [`docs/architecture/admission-and-preflight.md`](./docs/architecture/admission-and-preflight.md).
+
 ## Resuming after a crash
 
 Kill the machine, close the terminal, lose the session — nothing is lost. The next `miah run` replays the journal, reconciles any in-flight dispatches, and continues from the reconstructed state. This is the kill-drill-verified core invariant: **resume is the only implementation** (there is no separate resume code path). See [`docs/architecture/journal-and-recovery.md`](./docs/architecture/journal-and-recovery.md).

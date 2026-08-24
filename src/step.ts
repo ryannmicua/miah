@@ -30,12 +30,12 @@ import {
   isTerminalLifecycle,
   reconcileIntents,
   refFromIntent,
-  refusePastDeadline,
   resolveRoleDefaults,
   type DispatchContext,
   type GitCommitReader,
   type HandleResolver,
 } from "./dispatch";
+import { drivenMilliseconds } from "./driven-time";
 import {
   harvestEvidence,
   takeContinuityRecord,
@@ -491,7 +491,8 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
     }
   }
 
-  // (3) Budget predicates (R81). Run-level cost ceiling first.
+  // (3) Budget predicates (R81). Run-level cost ceiling first, then
+  // run-level deadline (R10-R14, KD2).
   if (ctx.config.run.cost_ceiling_usd !== undefined) {
     const usage = cumulativeUsageFromEvidence(store);
     if (usage !== null && usage.costUsd !== null && usage.costUsd > ctx.config.run.cost_ceiling_usd) {
@@ -500,6 +501,28 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
           unit_id: null,
           trigger: "cost-ceiling-exceeded",
           reason: `cumulative cost ${usage.costUsd} exceeds run ceiling ${ctx.config.run.cost_ceiling_usd} (R81/R82)`,
+        }),
+      );
+      ensurePhase(store, "Attention");
+      return outcome;
+    }
+  }
+
+  // R10-R14: run-level deadline. Compute driven time from journal events and
+  // compare against config.run.max_duration_s. On breach, escalate to Attention.
+  // The driver holds the lease at this point, so leaseFresh is true and the
+  // current epoch closes at now.
+  {
+    const nowMs = ctx.now ? ctx.now() : Date.now();
+    const events = store.journal.readEvents();
+    const drivenMs = drivenMilliseconds(events, { now: nowMs, leaseFresh: true });
+    const maxMs = ctx.config.run.max_duration_s * 1000;
+    if (drivenMs > maxMs) {
+      outcome.escalated.push(
+        raiseEscalationSummary(ctx, {
+          unit_id: null,
+          trigger: "run-deadline-exceeded",
+          reason: `driven time ${Math.round(drivenMs / 1000)}s exceeds run ceiling ${ctx.config.run.max_duration_s}s (R10-R14)`,
         }),
       );
       ensurePhase(store, "Attention");
@@ -715,12 +738,11 @@ export async function runStep(ctx: StepContext, runtime: StepRuntime): Promise<S
 
     const nowMs = ctx.now ? ctx.now() : Date.now();
     if (isPastDeadline(intent.deadline, nowMs)) {
-      await refusePastDeadline(dispatchCtx(ctx), refFromIntent(intent), handle);
-      outcome.polled.push({ unit_id: intent.unit_id, terminated: true });
-      outcome.refused.push({
-        unit_id: intent.unit_id,
-        reason: `deadline passed for take ${intent.take}; work refused (R5)`,
-      });
+      // R26/R14: the watchdog is the sole reaper. Skip this intent for this
+      // poll cycle — do not call adapter.stop, do not append any event, and
+      // do not advance the no-progress counter. The intent stays in-flight
+      // and its receipt is handled by the watchdog or at the next drain.
+      outcome.polled.push({ unit_id: intent.unit_id, terminated: false });
       continue;
     }
 

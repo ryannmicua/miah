@@ -71,7 +71,7 @@ describe("admission fails closed", () => {
     expect(failure?.message).toContain("ABSENT");
     expect(failure?.message).toContain("--max-duration");
     expect(result.run).toBeNull();
-    expect(maxDurationAbsentMessage(report)).toContain("Mechanism needed");
+    expect(maxDurationAbsentMessage(report)).toContain("To satisfy the max-duration gate, either:");
   });
 
   it("fails closed on MCP unscopable with a message naming the issue and the operator workaround (R87)", async () => {
