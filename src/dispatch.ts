@@ -477,6 +477,37 @@ export async function harvestEnvelope(
 }
 
 /**
+ * Record a deadline refusal in the journal (KTD4): append `gap_recorded` +
+ * `dispatch_terminated` with `deadline-exceeded`. This is the journal-only
+ * half of `refusePastDeadline`, extracted so the driver's receipt drain and
+ * the watchdog's post-takeover drain both produce identical artifacts.
+ * The event types, field set, and ordering are pinned to the characterization
+ * fixture (F4) committed in the test file.
+ */
+export function recordDeadlineRefusal(
+  store: { append(type: string, payload?: Record<string, unknown>): JournalEvent },
+  intent: DispatchRef,
+  identity: { agentId: string | null; workspaceId: string | null },
+): { terminatedEvent: JournalEvent; gapEvent: JournalEvent } {
+  const gapEvent = store.append("gap_recorded", {
+    unit_id: intent.unit_id,
+    criterion: "deadline",
+    reason: "specialist ran past the recorded deadline; work refused (R5)",
+  });
+  const terminatedEvent = store.append("dispatch_terminated", {
+    unit_id: intent.unit_id,
+    role: intent.role,
+    take: intent.take,
+    attempt: intent.idempotency_key,
+    agent_id: identity.agentId,
+    workspace_id: identity.workspaceId,
+    outcome: "deadline-exceeded",
+    idempotency_key: intent.idempotency_key,
+  });
+  return { terminatedEvent, gapEvent };
+}
+
+/**
  * Refuse work past a recorded deadline (R5/R44): terminate the specialist
  * immediately and close the dispatch with a deadline-exceeded gap. The full
  * deadline-exceeded handling pipeline lands in U6; the dispatch layer only
@@ -492,22 +523,10 @@ export async function refusePastDeadline(
   } catch {
     // best-effort terminate (R5): the agent may already be terminal.
   }
-  const gapEvent = ctx.store.append("gap_recorded", {
-    unit_id: intent.unit_id,
-    criterion: "deadline",
-    reason: "specialist ran past the recorded deadline; work refused (R5)",
+  return recordDeadlineRefusal(ctx.store, intent, {
+    agentId: handle.agentId,
+    workspaceId: handle.workspaceId,
   });
-  const terminatedEvent = ctx.store.append("dispatch_terminated", {
-    unit_id: intent.unit_id,
-    role: intent.role,
-    take: intent.take,
-    attempt: intent.idempotency_key,
-    agent_id: handle.agentId,
-    workspace_id: handle.workspaceId,
-    outcome: "deadline-exceeded",
-    idempotency_key: intent.idempotency_key,
-  });
-  return { terminatedEvent, gapEvent };
 }
 
 /**
@@ -623,26 +642,30 @@ async function reconcileOne(
     handle = { ...handle, cwd: inspect.cwd ?? handle.cwd };
   }
 
-  // Deadline refusal (R5): refuse all work produced past the recorded deadline
-  // before deciding any next transition.
+  // Deadline refusal (R5): the watchdog is the sole reaper of per-dispatch
+  // deadlines (R26, KD1). When reconcile finds an in-flight intent past its
+  // deadline, it records the finding and defers to the watchdog's reap
+  // receipt — it does NOT call adapter.stop, does NOT append gap_recorded,
+  // and does NOT append dispatch_terminated. The intent stays in-flight so
+  // the watchdog can kill it and write the receipt, or the driver can drain
+  // the receipt at its next step boundary.
   if (isPastDeadline(intent.deadline, now)) {
     ctx.store.append("reconcile_record", {
       unit_id: intent.unit_id,
       idempotency_key: intent.idempotency_key,
       intent_seq: intent.seq,
-      finding: "deadline-exceeded",
+      finding: "deadline-passed-defer-to-watchdog",
+      deadline: intent.deadline,
       agent_id: handle.agentId,
       lifecycle: status,
-      deadline: intent.deadline,
     });
-    const { terminatedEvent } = await refusePastDeadline(ctx, ref, handle);
     return {
       intent,
       outcome: "handle-found",
-      refused: true,
+      refused: false,
       failedEvent: null,
       createdEvent,
-      terminatedEvent,
+      terminatedEvent: null,
       handle,
       status,
     };

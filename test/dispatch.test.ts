@@ -812,16 +812,22 @@ describe("dispatch reconciliation", () => {
 
     expect(results).toHaveLength(1);
     const result = results[0];
-    expect(result.refused).toBe(true);
-    expect(adapter.stopCalls.map((handle) => handle.agentId)).toContain("agent-1");
-    expect(result.terminatedEvent?.outcome).toBe("deadline-exceeded");
-
-    const gap = t.store.stateSnapshot().open_gaps.find((g) => g.criterion === "deadline");
-    expect(gap).toBeDefined();
-    expect(String(gap?.reason)).toContain("R5");
-    // Work was refused: the envelope was never read as admissible.
+    // R26: reconcile defers to the watchdog — does NOT refuse, does NOT stop,
+    // does NOT produce a terminated event. The intent stays in-flight.
+    expect(result.refused).toBe(false);
+    expect(adapter.stopCalls).toHaveLength(0);
+    expect(result.terminatedEvent).toBeNull();
+    // A reconcile_record with the deferral finding should be in the journal.
+    const reconcileEvents = t.store.journal.readEvents().filter(
+      (e) => e.type === "reconcile_record",
+    );
+    expect(reconcileEvents.length).toBeGreaterThanOrEqual(1);
+    const lastReconcile = reconcileEvents[reconcileEvents.length - 1];
+    expect((lastReconcile as any).finding).toBe("deadline-passed-defer-to-watchdog");
+    // No gap_recorded or dispatch_terminated for this intent.
     const types = t.store.journal.readEvents().map((event) => event.type);
-    expect(types).not.toContain("result_envelope_observed");
+    expect(types).not.toContain("gap_recorded");
+    expect(types).not.toContain("dispatch_terminated");
   });
 
   it("reconcile with an in-flight intent whose adapter status is unknown lifecycle still closes safely", async () => {

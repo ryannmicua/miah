@@ -54,6 +54,22 @@ export interface RunConfig {
    * cost exceeds the ceiling.
    */
   cost_ceiling_usd?: number;
+  /**
+   * Run-level wall-clock bound on driven time (R10-R14, KD2). Default 28800s
+   * (8 hours of driven time). Operator-overridable in the config file.
+   * Enforced by the driver as an escalation to Attention, not as termination.
+   * Driven time counts only active supervision (lease held), resets on resume,
+   * and wall-clock gaps with no lease held are excluded.
+   */
+  max_duration_s: number;
+}
+
+/** Watchdog timing (U4, R19-R20). */
+export interface WatchdogConfig {
+  /** Heartbeat / reap cadence in seconds (default 60s). */
+  cadence_s: number;
+  /** Whether the watchdog is enabled (default true). */
+  enabled: boolean;
 }
 
 /** Calibration bar for the calibrated-judge tier (R74, KTD10). */
@@ -78,6 +94,7 @@ export interface Config {
   lease: LeaseConfig;
   dispatch: DispatchConfig;
   run: RunConfig;
+  watchdog: WatchdogConfig;
   calibration: CalibrationConfig;
 }
 
@@ -223,6 +240,11 @@ export const DEFAULT_CONFIG: Config = {
     concurrency_cap: 1,
     max_takes: 3,
     max_rework_cycles: 2,
+    max_duration_s: 8 * 60 * 60,
+  },
+  watchdog: {
+    cadence_s: 60,
+    enabled: true,
   },
   calibration: {
     min_corpus: 15,
