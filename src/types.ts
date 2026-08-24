@@ -64,6 +64,14 @@ export interface RunConfig {
   max_duration_s: number;
 }
 
+/** Watchdog timing (U4, R19-R20). */
+export interface WatchdogConfig {
+  /** Heartbeat / reap cadence in seconds (default 60s). */
+  cadence_s: number;
+  /** Whether the watchdog is enabled (default true). */
+  enabled: boolean;
+}
+
 /** Calibration bar for the calibrated-judge tier (R74, KTD10). */
 export interface CalibrationConfig {
   /** Minimum pre-labeled calibration corpus size (default >= 15). */
@@ -86,6 +94,7 @@ export interface Config {
   lease: LeaseConfig;
   dispatch: DispatchConfig;
   run: RunConfig;
+  watchdog: WatchdogConfig;
   calibration: CalibrationConfig;
 }
 
@@ -232,6 +241,10 @@ export const DEFAULT_CONFIG: Config = {
     max_takes: 3,
     max_rework_cycles: 2,
     max_duration_s: 8 * 60 * 60,
+  },
+  watchdog: {
+    cadence_s: 60,
+    enabled: true,
   },
   calibration: {
     min_corpus: 15,

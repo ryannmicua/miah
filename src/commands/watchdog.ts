@@ -36,9 +36,9 @@ export class WindowsTaskSchedulerRegistrar implements ServiceRegistrar {
     // timer mode (default): one-tick per invocation; task scheduler re-launches at cadence.
     // service mode: pass --resident so the process runs as a continuous loop.
     const residentFlag = opts.mode === "service" ? " --resident" : "";
-    const cmd = `schtasks /Create /TN "${TASK_NAME}" /TR "node \\"${scriptPath}\\" --basePath \\"${opts.basePath}\\"${residentFlag}" /SC MINUTE /MO ${mo} /F`;
+    const trString = `node "${scriptPath}" --basePath "${opts.basePath}"${residentFlag}`;
     try {
-      cp.execSync(cmd, { encoding: "utf8", stdio: "pipe" });
+      cp.execFileSync("schtasks", ["/Create", "/TN", TASK_NAME, "/TR", trString, "/SC", "MINUTE", "/MO", String(mo), "/F"], { encoding: "utf8", stdio: "pipe" });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -47,7 +47,7 @@ export class WindowsTaskSchedulerRegistrar implements ServiceRegistrar {
 
   async uninstall(): Promise<{ ok: boolean; error?: string }> {
     try {
-      cp.execSync(`schtasks /Delete /TN "${TASK_NAME}" /F`, { encoding: "utf8", stdio: "pipe" });
+      cp.execFileSync("schtasks", ["/Delete", "/TN", TASK_NAME, "/F"], { encoding: "utf8", stdio: "pipe" });
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -56,7 +56,7 @@ export class WindowsTaskSchedulerRegistrar implements ServiceRegistrar {
 
   async state(): Promise<"registered" | "absent" | "unknown"> {
     try {
-      cp.execSync(`schtasks /Query /TN "${TASK_NAME}"`, { encoding: "utf8", stdio: "pipe" });
+      cp.execFileSync("schtasks", ["/Query", "/TN", TASK_NAME], { encoding: "utf8", stdio: "pipe" });
       return "registered";
     } catch {
       return "absent";
@@ -87,7 +87,7 @@ export function createRegistrar(): ServiceRegistrar {
 export async function watchdogInstall(opts: { basePath?: string; cadenceS?: number; mode?: WatchdogMode }): Promise<number> {
   const basePath = opts.basePath ?? resolveConfigBasePath();
   const config = loadConfig({ configBasePath: basePath });
-  const cadenceS = opts.cadenceS ?? config.lease.ttl_s;
+  const cadenceS = opts.cadenceS ?? config.watchdog.cadence_s;
   const mode: WatchdogMode = opts.mode ?? "timer";
   const registrar = createRegistrar();
   const result = await registrar.install({ cadenceS, basePath, mode });
@@ -112,9 +112,10 @@ export async function watchdogUninstall(): Promise<number> {
 
 export async function watchdogStatus(opts: { basePath?: string }): Promise<number> {
   const basePath = opts.basePath ?? resolveConfigBasePath();
+  const config = loadConfig({ configBasePath: basePath });
   const registrar = createRegistrar();
   const state = await registrar.state();
-  const freshness = heartbeatFreshness(basePath);
+  const freshness = heartbeatFreshness(basePath, config.watchdog.cadence_s);
   console.log("miah watchdog status");
   console.log(`  platform: ${registrar.platform}`);
   console.log(`  registered: ${state}`);

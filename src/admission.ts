@@ -135,7 +135,7 @@ export async function admitPlan(planText: string, opts: AdmitOptions): Promise<A
     maxDurationSource = "paseo";
   } else {
     // Check watchdog heartbeat freshness (R20): healthy when age <= 2x cadence.
-    const watchdogCheck = heartbeatFreshness(opts.basePath);
+    const watchdogCheck = heartbeatFreshness(opts.basePath, opts.config.watchdog.cadence_s);
     if (watchdogCheck.healthy) {
       maxDurationSatisfied = true;
       maxDurationSource = "watchdog";

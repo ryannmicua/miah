@@ -1,14 +1,12 @@
 /**
- * U10 E2E — deadline-past-death refusal (R5, R44; U10.3).
+ * U10 E2E — deadline-past-death refusal (R26, R5, R44; U10.3).
  *
  * A dispatch is made with a recorded deadline, then "Miah is dead" past that
  * deadline (the test advances an injected clock by more than the per-agent
- * max-duration; the real specialist keeps working in real time). On resume, the
- * reconciliation must refuse all work produced past the recorded deadline:
- * terminate the specialist immediately, record `gap_recorded: deadline`, close
- * the dispatch with `dispatch_terminated: deadline-exceeded`, and never harvest
- * the envelope. With max-takes = 1 the unit's budget is exhausted, so the run
- * pauses in Attention instead of re-dispatching (no take-2 dispatch).
+ * max-duration; the real specialist keeps working in real time). On resume,
+ * the reconciliation must find the overdue intent and record the finding but
+ * NOT terminate the specialist or close the dispatch — the watchdog is the
+ * sole reaper (R26). The intent stays in-flight.
  *
  * Real dispatch (the live daemon); fake probe only to admit the run.
  */
@@ -71,7 +69,7 @@ interface Clock {
 
 describe("e2e deadline refusal", () => {
   it.runIf(paseoCliAvailable())(
-    "deadline expired while Miah was dead -> resume -> specialist terminated -> work refused -> gap_recorded: deadline-exceeded (R5)",
+    "deadline expired -> resume -> reconcile_record (not stop/gap/terminate) -> intent stays in-flight (R26)",
     async () => {
       const repo = makeFixtureRepo();
       const config = e2eConfig({ run: { max_takes: 1 } });
@@ -95,55 +93,55 @@ describe("e2e deadline refusal", () => {
         true,
       );
 
-      // "Miah is dead" past the deadline: advance the clock beyond it. The real
-      // specialist keeps working (or has already stopped) — either way the
-      // refusal is decided from the recorded deadline, not the agent's state.
+      // "Miah is dead" past the deadline: advance the clock beyond it.
       const deadlineMs = Date.parse(deadline as string);
       expect(Number.isNaN(deadlineMs)).toBe(false);
       clock.now = deadlineMs + 60_000;
 
-      // Resume: reconciliation must terminate the specialist and refuse the work
-      // before deciding any next transition (R5, R44).
-      const resumeCode = await quietDriveOnce(opts, runId);
-      // The run is paused (Attention, R66): exact RUN_BLOCKED_EXIT_CODE = 1.
-      expect(resumeCode).toBe(1);
+      // Resume: reconciliation must record the finding but NOT terminate the
+      // specialist or close the dispatch (R26: watchdog is sole reaper).
+      // The run may or may not pause at Attention depending on the poll
+      // result, but the key assertions are on the journal events.
+      await quietDriveOnce(opts, runId);
 
       const events = journalEvents(basePath, runId);
-      // The reconcile recorded the deadline-exceeded finding before the refusal.
+
+      // P1-1: R26 — reconcile found the overdue intent and recorded the finding.
       expect(
         events.some(
-          (e) => e.type === "reconcile_record" && e.unit_id === "U1" && e.finding === "deadline-exceeded",
+          (e) =>
+            e.type === "reconcile_record" &&
+            e.unit_id === "U1" &&
+            e.finding === "deadline-passed-defer-to-watchdog",
         ),
       ).toBe(true);
-      // The dispatch was terminated with the deadline-exceeded outcome.
+
+      // P1-1: R26 — did NOT append gap_recorded or dispatch_terminated.
       expect(
         events.some(
           (e) => e.type === "dispatch_terminated" && e.unit_id === "U1" && e.outcome === "deadline-exceeded",
         ),
-      ).toBe(true);
-      // The refusal is an open evidence gap referencing the deadline (R5, R52).
-      const gap = events.find(
-        (e) => e.type === "gap_recorded" && e.unit_id === "U1" && e.criterion === "deadline",
-      );
-      expect(gap).toBeDefined();
-      expect(String(gap?.reason)).toContain("deadline");
+      ).toBe(false);
+      expect(
+        events.some(
+          (e) => e.type === "gap_recorded" && e.unit_id === "U1" && e.criterion === "deadline",
+        ),
+      ).toBe(false);
 
-      // Work produced past the deadline was refused: no envelope observed, no
-      // evidence harvested for the dispatch.
+      // P1-1: R26 — intent stays in-flight (not terminated by reconcile).
+      const stateAfterResume = derivedState(basePath, runId);
+      expect(stateAfterResume.in_flight_intents.some((i) => i.unit_id === "U1")).toBe(true);
+
+      // P1-1: No envelope was harvested for the past-deadline dispatch.
       expect(events.some((e) => e.type === "result_envelope_observed" && e.unit_id === "U1")).toBe(
         false,
       );
       expect(events.some((e) => e.type === "evidence_harvested" && e.unit_id === "U1")).toBe(false);
 
-      // The refusal did not silently re-dispatch: no take-2 intent for U1, and
-      // the unit's budget (max-takes = 1) is exhausted -> the run pauses.
+      // No re-dispatch: only one dispatch_intent for U1.
       expect(
         events.filter((e) => e.type === "dispatch_intent" && e.unit_id === "U1"),
       ).toHaveLength(1);
-      const state = derivedState(basePath, runId);
-      expect(state.phase).toBe("Attention");
-      expect(state.open_gaps.some((g) => g.unit_id === "U1" && g.criterion === "deadline")).toBe(true);
-      expect(state.in_flight_intents).toHaveLength(0);
     },
     1_800_000,
   );

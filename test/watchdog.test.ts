@@ -36,6 +36,7 @@ import {
 import type { InFlightIntent, UnitId, Config } from "../src/types";
 import { RunStore } from "../src/run-store";
 import { readOnlyState } from "../src/commands/status";
+import { createStepRuntime, runStep } from "../src/step";
 import type { PaseoAdapter, PaseoHandle, PaseoInspectResult } from "../src/adapter/paseo";
 
 afterEach(() => {
@@ -144,7 +145,7 @@ describe("heartbeat", () => {
     const ts = createTestStore();
     const clock = makeClock(Date.now());
     writeHeartbeat(ts.basePath, "0.1.0", 60);
-    const result = heartbeatFreshness(ts.basePath, clock.now);
+    const result = heartbeatFreshness(ts.basePath, 60, clock.now);
     expect(result.healthy).toBe(true);
   });
 
@@ -155,7 +156,7 @@ describe("heartbeat", () => {
     fs.mkdirSync(ts.basePath, { recursive: true });
     const hb = { timestamp: new Date(now - 200_000).toISOString(), version: "0.1.0", cadence_s: 60 };
     fs.writeFileSync(path.join(ts.basePath, "watchdog-heartbeat.json"), JSON.stringify(hb));
-    const result = heartbeatFreshness(ts.basePath, now);
+    const result = heartbeatFreshness(ts.basePath, 60, now);
     expect(result.healthy).toBe(false);
   });
 
@@ -181,7 +182,7 @@ describe("heartbeat", () => {
     fs.mkdirSync(ts.basePath, { recursive: true });
     const hb = { timestamp: new Date(now - cadence * 2 * 1000).toISOString(), version: "0.1.0", cadence_s: cadence };
     fs.writeFileSync(path.join(ts.basePath, "watchdog-heartbeat.json"), JSON.stringify(hb));
-    const result = heartbeatFreshness(ts.basePath, now);
+    const result = heartbeatFreshness(ts.basePath, 60, now);
     expect(result.healthy).toBe(true);
   });
 });
@@ -450,10 +451,54 @@ describe("AE3: driver drains receipt", () => {
 // ---------------------------------------------------------------------------
 
 describe("AE4: driver skips overdue intent without receipt", () => {
-  it("scan finds no receipts for non-existent receipt directory", () => {
-    const ts = createTestStore();
+  it("tick kills overdue intent and writes receipt but does NOT call adapter.stop for reconcile", async () => {
+    // AE4 verifies the negative: the watchdog kills and writes a receipt, but
+    // the driver (reconcile path) never calls adapter.stop. The driver only
+    // drains existing receipts at step boundary.
+    const clock = makeClock(Date.now());
+    const ts = createTestStore({ holderId: "driver-A", clock });
+    const adapter = new MockAdapter();
+    ts.store.lease.acquire("driver-A");
+
+    // Write manifest for scanRun
+    const manifest = {
+      schema_version: 1, run_id: ts.runId, plan_hash: "abc",
+      plan_snapshot_file: "plan-snapshot.v1.md", created_at: new Date().toISOString(),
+      config_snapshot: ts.config, probe_verdicts: {},
+    };
+    fs.writeFileSync(ts.layout.manifestPath, JSON.stringify(manifest));
+
+    const intent = makeIntent({ deadline: pastDeadline(clock.now) });
+    journalInFlightIntent(ts.store, intent);
+
+    // Simulate a tick: watchdog kills the intent and writes a receipt.
+    await tick(adapter, {
+      basePath: ts.basePath,
+      config: ts.config,
+      version: "0.1.0",
+      now: clock.now,
+    });
+
+    // Receipt written by watchdog.
     const receipts = listReceipts(ts.layout.reapReceiptsDir);
-    expect(receipts).toHaveLength(0);
+    expect(receipts).toHaveLength(1);
+
+    // Now the driver drains the receipt — it journals gap_recorded + dispatch_terminated
+    // but does NOT call adapter.stop (R26: watchdog already killed it).
+    adapter.stopCalls.length = 0;
+    const summary = drainReapReceipts(ts.store);
+    expect(summary.drained).toBe(1);
+
+    // Driver never calls adapter.stop (R26).
+    expect(adapter.stopCalls).toHaveLength(0);
+
+    // Receipt was consumed.
+    expect(listReceipts(ts.layout.reapReceiptsDir)).toHaveLength(0);
+
+    // Journal now has gap + terminated from drain.
+    const events = ts.store.journal.readEvents();
+    expect(events.some((e) => e.type === "gap_recorded")).toBe(true);
+    expect(events.some((e) => e.type === "dispatch_terminated")).toBe(true);
   });
 });
 
@@ -499,7 +544,100 @@ describe("AE5: already-closed dispatch receipt discarded", () => {
 });
 
 // ---------------------------------------------------------------------------
-// AE8/AE9: Admission gate watchdog health
+// AE7: Run-level deadline escalation (step.ts:511-531, R10-R14)
+// ---------------------------------------------------------------------------
+
+describe("AE7: run-level deadline escalation", () => {
+  it("runStep escalates when driven time exceeds max_duration_s", async () => {
+    const ts = createTestStore({
+      config: fastConfig({ run: { max_duration_s: 10 } }),
+      holderId: "driver-A",
+    });
+    ts.store.lease.acquire("driver-A");
+
+    // Journal a run_start + lease events to create driven time.
+    ts.store.append("run_start", { run_id: ts.runId, plan_hash: "abc" });
+    ts.store.append("lease_acquired", { holder: "driver-A" });
+
+    // Advance clock so driven time exceeds 10s max.
+    ts.clock.now = Date.now() + 20_000;
+
+    // Renew the lease heartbeat so it's not stale after clock advance.
+    ts.store.lease.maybeHeartbeat("driver-A", () => ts.clock.now);
+
+    // Run one step — the run-level deadline check in step.ts should fire.
+    const runtime = createStepRuntime();
+    const outcome = await runStep(
+      {
+        store: ts.store,
+        config: ts.config,
+        adapter: new MockAdapter(),
+        now: () => ts.clock.now,
+        verificationCommandsFor: () => [],
+      },
+      runtime,
+    );
+
+    // Should have escalated with run-deadline-exceeded trigger.
+    expect(outcome.escalated.length).toBeGreaterThanOrEqual(1);
+    expect(outcome.escalated.some((e) => e.trigger === "run-deadline-exceeded")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Drill C: Driver never calls adapter.stop for a deadline (R26)
+// ---------------------------------------------------------------------------
+
+describe("Drill C: driver never calls adapter.stop for a deadline", () => {
+  it("tick + drain produces gap_recorded + dispatch_terminated without any adapter.stop call", async () => {
+    const clock = makeClock(Date.now());
+    const ts = createTestStore({ holderId: "driver-A", clock });
+    const adapter = new MockAdapter();
+    ts.store.lease.acquire("driver-A");
+
+    // Write manifest for scanRun
+    const manifest = {
+      schema_version: 1, run_id: ts.runId, plan_hash: "abc",
+      plan_snapshot_file: "plan-snapshot.v1.md", created_at: new Date().toISOString(),
+      config_snapshot: ts.config, probe_verdicts: {},
+    };
+    fs.writeFileSync(ts.layout.manifestPath, JSON.stringify(manifest));
+
+    const intent = makeIntent({ deadline: pastDeadline(clock.now) });
+    journalInFlightIntent(ts.store, intent);
+
+    // 1. Watchdog tick kills the intent and writes a receipt.
+    await tick(adapter, {
+      basePath: ts.basePath,
+      config: ts.config,
+      version: "0.1.0",
+      now: clock.now,
+    });
+
+    // Watchdog called adapter.stop (that's its job).
+    expect(adapter.stopCalls.length).toBeGreaterThanOrEqual(1);
+
+    // 2. Driver drains at step boundary — must NOT call adapter.stop (R26).
+    adapter.stopCalls.length = 0;
+    const summary = drainReapReceipts(ts.store);
+    expect(summary.drained).toBe(1);
+    expect(adapter.stopCalls).toHaveLength(0);
+
+    // 3. Journal has gap_recorded + dispatch_terminated from drain.
+    const events = ts.store.journal.readEvents();
+    const gaps = events.filter((e) => e.type === "gap_recorded");
+    const terms = events.filter((e) => e.type === "dispatch_terminated");
+    expect(gaps.length).toBeGreaterThanOrEqual(1);
+    expect(terms.length).toBeGreaterThanOrEqual(1);
+    expect(terms.some((t) => (t as any).outcome === "deadline-exceeded")).toBe(true);
+
+    // 4. Receipt consumed.
+    expect(listReceipts(ts.layout.reapReceiptsDir)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admission gate watchdog health
 // ---------------------------------------------------------------------------
 
 describe("admission gate watchdog health", () => {
@@ -512,7 +650,7 @@ describe("admission gate watchdog health", () => {
   it("AE9: fresh heartbeat means max-duration satisfied", () => {
     const ts = createTestStore();
     writeHeartbeat(ts.basePath, "0.1.0", 60);
-    const result = heartbeatFreshness(ts.basePath, Date.now());
+    const result = heartbeatFreshness(ts.basePath, 60, Date.now());
     expect(result.healthy).toBe(true);
   });
 });

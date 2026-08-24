@@ -173,7 +173,7 @@ export function registerCommands(program: Command): void {
     .command("install")
     .description("Register the watchdog (default: timer/oneshot; --mode service for resident loop)")
     .option("--base-path <path>", "base path for the watchdog (defaults to config)")
-    .option("--cadence <seconds>", "heartbeat cadence in seconds (defaults to lease TTL)")
+    .option("--cadence <seconds>", "heartbeat cadence in seconds (defaults to watchdog cadence)")
     .option("--mode <mode>", "timer (oneshot tick, default) or service (resident loop)", "timer")
     .action((opts: { basePath?: string; cadence?: string; mode?: string }) => {
       const mode: WatchdogMode = opts.mode === "service" ? "service" : "timer";

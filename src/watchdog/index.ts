@@ -7,7 +7,7 @@
 import { RunStore } from "../run-store";
 import { scanAllRuns, type RunScanResult } from "./scan";
 import { killIntent } from "./kill";
-import { writeReceipt, drainReapReceipts } from "./receipts";
+import { writeReceipt, listReceipts, drainReapReceipts } from "./receipts";
 import { writeHeartbeat, heartbeatFreshness } from "./heartbeat";
 import type { PaseoAdapter } from "../adapter/paseo";
 import type { Config } from "../types";
@@ -49,22 +49,23 @@ export async function tick(
   const { basePath, config, version, now } = opts;
   const nowMs = now ?? Date.now();
   const report = emptyReport();
-  const scanResults = scanAllRuns(basePath, config, nowMs);
-  report.runsScanned = scanResults.length;
+  const scan = scanAllRuns(basePath, config, nowMs);
+  report.runsScanned = scan.results.length;
+  report.errors.push(...scan.failures);
 
-  for (const scan of scanResults) {
+  for (const scanResult of scan.results) {
     try {
-      await processRun(adapter, scan, report, basePath, config, version);
+      await processRun(adapter, scanResult, report, basePath, config, version);
     } catch (err) {
       report.errors.push(
-        `run ${scan.runId}: ${err instanceof Error ? err.message : String(err)}`,
+        `run ${scanResult.runId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
   // R19: write heartbeat unconditionally, even when errors occurred.
   try {
-    writeHeartbeat(basePath, version, config.lease.ttl_s);
+    writeHeartbeat(basePath, version, config.watchdog.cadence_s);
   } catch (err) {
     report.errors.push(
       `heartbeat write failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -82,6 +83,27 @@ async function processRun(
   version: string,
 ): Promise<void> {
   const { runId, layout, lease: leaseSnapshot, overdueIntents } = scan;
+
+  // P2-9: Hoist drain above overdueIntents check. Even when no intents are
+  // overdue, stale receipts from a previous tick may be waiting (U3: "a stale
+  // receipt from a previous tick is drained on a later tick that acquires the
+  // lease, even though that tick killed nothing").
+  const pendingReceipts = listReceipts(layout.reapReceiptsDir);
+  if (pendingReceipts.length > 0 && !leaseSnapshot.fresh) {
+    const store = new RunStore({ basePath, runId, config, holderId: watchdogHolderId() });
+    const acquireResult = store.lease.acquire(watchdogHolderId());
+    if (acquireResult.ok) {
+      try {
+        drainReapReceipts(store);
+        report.leasesTakenOver += 1;
+      } finally {
+        try { store.lease.release(watchdogHolderId()); } catch { /* best effort */ }
+      }
+    } else {
+      report.takeoversRefused += 1;
+    }
+  }
+
   if (overdueIntents.length === 0) return;
   report.runsWithOverdue += 1;
 
@@ -137,12 +159,12 @@ export async function runLoop(
   adapter: PaseoAdapter,
   opts: { basePath: string; config: Config; version: string },
 ): Promise<void> {
-  const existing = heartbeatFreshness(opts.basePath);
+  const existing = heartbeatFreshness(opts.basePath, opts.config.watchdog.cadence_s);
   if (existing.healthy) {
     console.error(`miah-watchdog: another tick is healthy (age ${Math.round(existing.ageMs / 1000)}s); exiting.`);
     return;
   }
-  console.log(`miah-watchdog: starting loop (cadence ${opts.config.lease.ttl_s}s)`);
+  console.log(`miah-watchdog: starting loop (cadence ${opts.config.watchdog.cadence_s}s)`);
   for (;;) {
     try {
       const report = await tick(adapter, {
@@ -156,6 +178,6 @@ export async function runLoop(
     } catch (err) {
       console.error(`miah-watchdog: tick failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, opts.config.lease.ttl_s * 1000));
+    await new Promise((resolve) => setTimeout(resolve, opts.config.watchdog.cadence_s * 1000));
   }
 }

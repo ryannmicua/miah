@@ -84,10 +84,13 @@ export function readHeartbeat(basePath: string): HeartbeatFile | null {
 
 /**
  * Freshness predicate (R20): healthy when heartbeat exists and age <= 2x cadence.
+ * The cadence parameter is the *configured* cadence from config.watchdog.cadence_s,
+ * not the cadence stored in the heartbeat file (which is provenance only).
  * Returns `{ healthy: boolean; heartbeat: HeartbeatFile | null; ageMs: number }`.
  */
 export function heartbeatFreshness(
   basePath: string,
+  cadenceS?: number,
   now?: number,
 ): { healthy: boolean; heartbeat: HeartbeatFile | null; ageMs: number } {
   const hb = readHeartbeat(basePath);
@@ -98,7 +101,8 @@ export function heartbeatFreshness(
   if (Number.isNaN(hbTime)) {
     return { healthy: false, heartbeat: hb, ageMs: Infinity };
   }
-  const ageMs = (now ?? Date.now()) - hbTime;
-  const maxAgeMs = hb.cadence_s * 2 * 1000;
+  const ageMs = Math.abs((now ?? Date.now()) - hbTime);
+  const effectiveCadence = cadenceS ?? hb.cadence_s;
+  const maxAgeMs = effectiveCadence * 2 * 1000;
   return { healthy: ageMs <= maxAgeMs, heartbeat: hb, ageMs };
 }

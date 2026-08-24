@@ -19,6 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { InFlightIntent, UnitId } from "../types";
 import type { RunStore } from "../run-store";
+import { recordDeadlineRefusal, refFromIntent } from "../dispatch";
 
 // ---------------------------------------------------------------------------
 // Schema (F9)
@@ -138,6 +139,8 @@ export function readReceipt(filePath: string): ReceiptReadResult {
     return { ok: false, reason: "not-object", filePath };
   }
   const r = parsed as Record<string, unknown>;
+
+  // Validate ALL required fields with their types (R23, P2-7).
   if (r.schema !== REAP_RECEIPT_SCHEMA) {
     return { ok: false, reason: `wrong-schema: ${String(r.schema)}`, filePath };
   }
@@ -149,6 +152,37 @@ export function readReceipt(filePath: string): ReceiptReadResult {
   }
   if (typeof r.reap_timestamp !== "number") {
     return { ok: false, reason: "missing-reap-timestamp", filePath };
+  }
+  if (typeof r.take !== "number") {
+    return { ok: false, reason: "missing-take", filePath };
+  }
+  if (typeof r.role !== "string") {
+    return { ok: false, reason: "missing-role", filePath };
+  }
+  if (typeof r.run_id !== "string") {
+    return { ok: false, reason: "missing-run-id", filePath };
+  }
+  if (typeof r.deadline !== "string") {
+    return { ok: false, reason: "missing-deadline", filePath };
+  }
+  if (typeof r.reaper !== "string") {
+    return { ok: false, reason: "missing-reaper", filePath };
+  }
+  if (typeof r.version !== "string") {
+    return { ok: false, reason: "missing-version", filePath };
+  }
+  if (typeof r.agent_id !== "string" && r.agent_id !== null) {
+    return { ok: false, reason: "bad-agent-id", filePath };
+  }
+  if (typeof r.workspace_id !== "string" && r.workspace_id !== null) {
+    return { ok: false, reason: "bad-workspace-id", filePath };
+  }
+  if (typeof r.error !== "string" && r.error !== null) {
+    return { ok: false, reason: "bad-error", filePath };
+  }
+  const validOutcomes: AdapterOutcome[] = ["terminated", "adapter-failed", "no-recorded-agent"];
+  if (!validOutcomes.includes(r.adapter_outcome as AdapterOutcome)) {
+    return { ok: false, reason: `bad-adapter-outcome: ${String(r.adapter_outcome)}`, filePath };
   }
   return { ok: true, receipt: parsed as unknown as ReapReceipt };
 }
@@ -220,20 +254,11 @@ export function consume(
   intent: InFlightIntent,
   filePath: string,
 ): void {
-  store.append("gap_recorded", {
-    unit_id: intent.unit_id,
-    criterion: "deadline",
-    reason: "deadline-exceeded; receipt consumed",
-  });
-  store.append("dispatch_terminated", {
-    unit_id: intent.unit_id,
-    role: intent.role,
-    take: intent.take,
-    attempt: receipt.intent_id,
-    agent_id: intent.agent_id,
-    workspace_id: intent.workspace_id,
-    outcome: "deadline-exceeded",
-    idempotency_key: intent.idempotency_key,
+  // P2-4: Use the shared recordDeadlineRefusal to produce identical artifacts
+  // by construction, not by careful imitation (KTD4).
+  recordDeadlineRefusal(store, refFromIntent(intent), {
+    agentId: intent.agent_id,
+    workspaceId: intent.workspace_id,
   });
   try {
     fs.rmSync(filePath, { force: true });

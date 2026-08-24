@@ -92,23 +92,27 @@ export function scanRun(
 /**
  * Scan all runs under the run store base path. Returns scan results
  * for every run that has a manifest (R9: unreadable runs are skipped).
+ * P2-8: returns { results, failures } so callers can surface per-run
+ * scan failures in tick reports (KTD12).
  */
 export function scanAllRuns(
   basePath: string,
   config: Config,
   now: number,
-): RunScanResult[] {
+): { results: RunScanResult[]; failures: string[] } {
   const runIds = listRunIds(basePath);
   const results: RunScanResult[] = [];
+  const failures: string[] = [];
   for (const runId of runIds) {
     try {
       const result = scanRun(basePath, runId, config, now);
       if (result !== null) {
         results.push(result);
       }
-    } catch {
-      // Per-run failure contained; continue processing other runs (R9).
+    } catch (err) {
+      // Per-run failure contained; record and continue processing other runs (R9).
+      failures.push(`scan ${runId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  return results;
+  return { results, failures };
 }
